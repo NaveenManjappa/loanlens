@@ -45,15 +45,18 @@ def validate_application(state: IntakeState) -> dict:
     A field counts as missing if the key is absent OR its value is None.
     Keep missing_fields in the same order as REQUIRED_FIELDS.
     """
-    resturnValue = {"missing_fields": [], "is_complete": True}
-    for key in REQUIRED_FIELDS:
-        if key not in state["application"]:
-            resturnValue["missing_fields"].append(key)
-            resturnValue["is_complete"] = False
-        elif state["application"][key] is None:
-            resturnValue["missing_fields"].append(key)
-            resturnValue["is_complete"] = False
-    return resturnValue
+    # resturnValue = {"missing_fields": [], "is_complete": True}
+    # for key in REQUIRED_FIELDS:
+    #     if key not in state["application"]:
+    #         resturnValue["missing_fields"].append(key)
+    #         resturnValue["is_complete"] = False
+    #     elif state["application"][key] is None:
+    #         resturnValue["missing_fields"].append(key)
+    #         resturnValue["is_complete"] = False
+    # return resturnValue
+    app = state["application"]
+    missing = [field for field in REQUIRED_FIELDS if app.get(field) is None]
+    return {"missing_fields": missing, "is_complete": not missing}
 
 
 def compute_ratios(state: IntakeState) -> dict:
@@ -72,12 +75,7 @@ def compute_ratios(state: IntakeState) -> dict:
     loan_amount = state["application"]["loan_amount"]
     annual_income = state["application"]["annual_income"]
 
-    if (
-        loan_amount is None
-        or loan_amount == 0
-        or annual_income is None
-        or annual_income == 0
-    ):
+    if loan_amount is None or annual_income is None or annual_income == 0:
         return {"loan_to_income": None}
 
     return {
@@ -91,10 +89,11 @@ def compute_ratios(state: IntakeState) -> dict:
 def summarise(state: IntakeState) -> dict:
     """Return {"status": "ready_for_review"} if the application is complete,
     otherwise {"status": "incomplete"}."""
-    if state["is_complete"]:
-        return {"status": "ready_for_review"}
-    else:
-        return {"status": "incomplete"}
+    # if state["is_complete"]:
+    #     return {"status": "ready_for_review"}
+    # else:
+    #     return {"status": "incomplete"}
+    return {"status": "ready_for_review" if state["is_complete"] else "incomplete"}
 
 
 def build_graph():
@@ -107,11 +106,9 @@ def build_graph():
     builder.add_node(validate_application)
     builder.add_node(compute_ratios)
     builder.add_node(summarise)
-    builder.add_edge(START,"validate_application")
-    builder.add_edge("validate_application","compute_ratios")
-    builder.add_edge("compute_ratios","summarise")
-    builder.add_edge("summarise",END)
+    builder.add_edge(START, "validate_application")
+    builder.add_edge("validate_application", "compute_ratios")
+    builder.add_edge("compute_ratios", "summarise")
+    builder.add_edge("summarise", END)
 
-    graph = builder.compile()
-    return graph
-
+    return builder.compile()
