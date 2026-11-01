@@ -47,7 +47,8 @@ def route_after_validation(state: PipelineState) -> str | list[str]:
     """Incomplete application -> "request_missing_info".
     Complete application      -> SCREENING_CHECKS (a LIST of node names: all of
                                  them run next, in parallel, the same fan-out as Lesson 2)."""
-    raise NotImplementedError
+    is_complete = state.get("is_complete")
+    return "request_missing_info" if not is_complete else SCREENING_CHECKS
 
 
 def route_after_screening(
@@ -57,7 +58,12 @@ def route_after_screening(
     "under_18" in risk_flags -> "decline"   (hard rule: we never lend to minors)
     any other flag           -> "refer_to_underwriter"
     no flags                 -> "approve_in_principle\""""
-    raise NotImplementedError
+    risk_flags = state.get("risk_flags")
+    if "under_18" in risk_flags:
+        return "decline"
+    if risk_flags:
+        return "refer_to_underwriter"
+    return "approve_in_principle"
 
 
 # ── Outcome nodes ──────────────────────────────────────────────────────────
@@ -68,27 +74,43 @@ def request_missing_info(state: PipelineState) -> dict:
     "outcome":  "awaiting_information"
     "messages": [AIMessage("Thanks. To continue, we need: age, annual_income.")]
                 (list the missing_fields in order, comma-separated, exactly like that)"""
-    raise NotImplementedError
+    missing_fields = state.get("missing_fields")
+    return {
+        "outcome": "awaiting_information",
+        "messages": [
+            AIMessage(f"Thanks. To continue, we need: {', '.join(missing_fields)}.")
+        ],
+    }
 
 
 def decline(state: PipelineState) -> dict:
     return {
         "outcome": "declined",
-        "messages": [AIMessage("We're unable to offer a loan: applicants must be 18 or over.")],
+        "messages": [
+            AIMessage("We're unable to offer a loan: applicants must be 18 or over.")
+        ],
     }
 
 
 def refer_to_underwriter(state: PipelineState) -> dict:
     return {
         "outcome": "referred",
-        "messages": [AIMessage("Thanks. Your application has been passed to an underwriter for review.")],
+        "messages": [
+            AIMessage(
+                "Thanks. Your application has been passed to an underwriter for review."
+            )
+        ],
     }
 
 
 def approve_in_principle(state: PipelineState) -> dict:
     return {
         "outcome": "approved_in_principle",
-        "messages": [AIMessage("Good news: your loan is approved in principle, subject to final checks.")],
+        "messages": [
+            AIMessage(
+                "Good news: your loan is approved in principle, subject to final checks."
+            )
+        ],
     }
 
 
@@ -106,4 +128,40 @@ def build_graph(model=None):
                    ...and one more add_conditional_edges after "combine".
 
     If model is None, use get_model() (import inside the function, like Lesson 3)."""
-    raise NotImplementedError
+    if not model:
+        from loanlens.llm import get_model
+        model = get_model()
+    builder = StateGraph(PipelineState)
+    builder.add_node(make_extract_node(model))
+    builder.add_node(validate_application)
+    builder.add_node(check_affordability)
+    builder.add_node(check_employment)
+    builder.add_node(check_age)
+    builder.add_node(combine)
+    builder.add_node(request_missing_info)
+    builder.add_node(decline)
+    builder.add_node(refer_to_underwriter)
+    builder.add_node(approve_in_principle)
+
+    builder.add_edge(START,"extract_details")
+    builder.add_edge("extract_details","validate_application")
+    #builder.add_edge("validate_application","check_affordability")
+    #builder.add_edge("validate_application","check_employment")
+    #builder.add_edge("validate_application","check_age")
+    builder.add_conditional_edges("validate_application",route_after_validation,["request_missing_info", *SCREENING_CHECKS])
+    builder.add_edge("check_affordability","combine")
+    builder.add_edge("check_employment","combine")
+    builder.add_edge("check_age","combine")
+    builder.add_conditional_edges("combine",route_after_screening)
+    builder.add_edge("request_missing_info",END)
+    builder.add_edge("decline",END)
+    builder.add_edge("refer_to_underwriter",END)
+    builder.add_edge("approve_in_principle",END)
+    
+    
+
+    graph = builder.compile()
+    
+    return graph
+
+

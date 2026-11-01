@@ -26,7 +26,9 @@ MAX_LOAN_TO_INCOME = 0.5  # flag if loan is MORE than 50% of annual income
 class ScreeningState(MessagesState, total=False):
     # `messages` is inherited from MessagesState: list of messages, reducer = add_messages
     application: dict
-    risk_flags: Annotated[list[str],add]  # TODO(Lesson 2): three parallel nodes write here. What does this key need?
+    risk_flags: Annotated[
+        list[str], add
+    ]  # TODO(Lesson 2): three parallel nodes write here. What does this key need?
     decision_hint: str  # "clear" | "refer"
 
 
@@ -45,7 +47,8 @@ def check_affordability(state: ScreeningState) -> dict:
 def check_age(state: ScreeningState) -> dict:
     """Return {"risk_flags": ["under_18"]} if age < MIN_AGE, otherwise {"risk_flags": []}."""
     age = state["application"]["age"]
-
+    if not age:
+        return {"risk_flags": []}
     return {"risk_flags": ["under_18"] if age < MIN_AGE else []}
 
 
@@ -93,14 +96,11 @@ def build_graph():
     builder.add_node(check_age)
     builder.add_node(check_employment)
     builder.add_node(combine)
-    builder.add_edge(START,"check_affordability")
-    builder.add_edge(START,"check_age")
-    builder.add_edge(START,"check_employment")
-    builder.add_edge("check_affordability","combine")
-    builder.add_edge("check_age","combine")
-    builder.add_edge("check_employment","combine")
-    builder.add_edge("combine",END)
+    builder.add_edge(START, "check_affordability")
+    builder.add_edge(START, "check_age")
+    builder.add_edge(START, "check_employment")
+    builder.add_edge("check_affordability", "combine")
+    builder.add_edge("check_age", "combine")
+    builder.add_edge("check_employment", "combine")
+    builder.add_edge("combine", END)
     return builder.compile()
-
-
-    
