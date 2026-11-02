@@ -84,7 +84,10 @@ def tool_node(state: InvestigationState) -> dict:
         tool = TOOLS_BY_NAME.get(name)
         if tool is None:
             messages.append(
-                ToolMessage(content="Error: unknown tool", tool_call_id=tool_call_id)
+                ToolMessage(
+                    content=f"Error: unknown tool '{name}'. Available tools: {', '.join(TOOLS_BY_NAME)}",
+                    tool_call_id=tool_call_id,
+                )
             )
         else:
             result = tool.invoke(args)
@@ -129,18 +132,18 @@ def build_graph(model=None):
     If model is None: from loanlens.llm import get_model."""
     if model is None:
         from loanlens.llm import get_model
+
         model = get_model()
     builder = StateGraph(InvestigationState)
     builder.add_node(make_investigator_node(model))
-    builder.add_node("tools",tool_node)
+    builder.add_node("tools", tool_node)
     builder.add_node(escalate)
-    builder.add_node(should_continue)
 
     builder.add_edge(START, "investigator")
     builder.add_conditional_edges(
-        "investigator", should_continue,["tools","escalate",END]
+        "investigator", should_continue, ["tools", "escalate", END]
     )
     builder.add_edge("tools", "investigator")
     builder.add_edge("escalate", END)
-    #builder.add_edge("investigator", END)
+    # builder.add_edge("investigator", END)
     return builder.compile()
