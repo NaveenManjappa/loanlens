@@ -59,12 +59,18 @@ def calculate_affordability(
         term_months: repayment term in months (default 36)
 
     Returns monthly_repayment, debt_to_income, and affordable (bool)."""
-    # TODO(Lesson 5): plain arithmetic, no LLM.
+    
     #   monthly_repayment = loan_amount / term_months              (round to 2 dp; no interest in policy v0)
     #   debt_to_income    = (existing_monthly_debt + monthly_repayment) / (annual_income / 12)   (round to 2 dp)
     #   affordable        = debt_to_income <= MAX_DEBT_TO_INCOME
     # return {"monthly_repayment": ..., "debt_to_income": ..., "affordable": ...}
-    raise NotImplementedError
-
+    monthly_repayment = round(loan_amount / term_months, 2)
+    debt_to_income = round((monthly_repayment+existing_monthly_debt)/(annual_income/12),2)
+    affordable = debt_to_income <= MAX_DEBT_TO_INCOME
+    return {
+        "monthly_repayment":monthly_repayment,
+        "debt_to_income":debt_to_income,
+        "affordable":affordable
+    }
 
 TOOLS = [lookup_credit_file, verify_self_employed_income, calculate_affordability]

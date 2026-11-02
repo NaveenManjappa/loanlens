@@ -21,6 +21,8 @@ sam = {
     "employment_status": "self_employed",
 }
 graph = build_graph()
+print("── Graph (paste into https://mermaid.live) ──")
+print(graph.get_graph().draw_mermaid())
 inputs = {"application": sam, "messages": [HumanMessage("Investigate this referred application.")]}
 
 # recursion_limit = LangGraph's own backstop on super-steps (its default is ~10,000: far too high to be a real cap)

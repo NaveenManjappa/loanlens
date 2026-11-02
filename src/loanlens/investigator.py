@@ -49,7 +49,18 @@ def make_investigator_node(model):
     3. return {"messages": [response]}   (the AIMessage, possibly carrying .tool_calls)"""
 
     def investigator(state: InvestigationState) -> dict:
-        raise NotImplementedError
+        model_with_tools = model.bind_tools(TOOLS)
+        response = model_with_tools.invoke(
+            [
+                SystemMessage(
+                    INVESTIGATOR_PROMPT.format(
+                        application=json.dumps(state["application"])
+                    )
+                ),
+                *state["messages"],
+            ]
+        )
+        return {"messages": [response]}
 
     return investigator
 
@@ -61,7 +72,26 @@ def tool_node(state: InvestigationState) -> dict:
     If the name isn't a known tool, DON'T crash: return a ToolMessage whose content
     starts with "Error: unknown tool" so the model can recover.
     Also return "tool_rounds": previous value (default 0) + 1."""
-    raise NotImplementedError
+    tool_rounds = state.get("tool_rounds", 0)
+    tool_rounds += 1
+    last_message = state["messages"][-1]
+    messages = []
+
+    for tool_call in last_message.tool_calls:
+        name = tool_call.get("name")
+        args = tool_call.get("args")
+        tool_call_id = tool_call.get("id")
+        tool = TOOLS_BY_NAME.get(name)
+        if tool is None:
+            messages.append(
+                ToolMessage(content="Error: unknown tool", tool_call_id=tool_call_id)
+            )
+        else:
+            result = tool.invoke(args)
+            messages.append(
+                ToolMessage(content=json.dumps(result), tool_call_id=tool_call_id)
+            )
+    return {"messages": messages, "tool_rounds": tool_rounds}
 
 
 def should_continue(state: InvestigationState) -> Literal["tools", "escalate", END]:
@@ -70,7 +100,14 @@ def should_continue(state: InvestigationState) -> Literal["tools", "escalate", E
     - natural stop: last message has no tool_calls            -> END
     - otherwise:    the model wants tools                     -> "tools"
     (Check the hard cap FIRST. Why? Answer that when you report back.)"""
-    raise NotImplementedError
+    tool_rounds = state.get("tool_rounds", 0)
+    last_message = state["messages"][-1]
+    if tool_rounds >= MAX_TOOL_ROUNDS:
+        return "escalate"
+    elif not last_message.tool_calls:
+        return END
+    else:
+        return "tools"
 
 
 def escalate(state: InvestigationState) -> dict:
@@ -90,4 +127,20 @@ def build_graph(model=None):
            tools -> investigator   (<- THIS edge is what makes it a loop)
            escalate -> END
     If model is None: from loanlens.llm import get_model."""
-    raise NotImplementedError
+    if model is None:
+        from loanlens.llm import get_model
+        model = get_model()
+    builder = StateGraph(InvestigationState)
+    builder.add_node(make_investigator_node(model))
+    builder.add_node("tools",tool_node)
+    builder.add_node(escalate)
+    builder.add_node(should_continue)
+
+    builder.add_edge(START, "investigator")
+    builder.add_conditional_edges(
+        "investigator", should_continue,["tools","escalate",END]
+    )
+    builder.add_edge("tools", "investigator")
+    builder.add_edge("escalate", END)
+    #builder.add_edge("investigator", END)
+    return builder.compile()
