@@ -23,12 +23,15 @@ from langchain.agents.middleware import (  # noqa: F401
     ToolErrorMiddleware,
     ToolRetryMiddleware,
 )
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
 
 from loanlens.tools import TOOLS
 
 MAX_MODEL_CALLS = 6  # hard cap: 6 model calls = up to 5 tool rounds + a final answer (same budget as Lesson 5)
-TRANSIENT_ERRORS = (ConnectionError, TimeoutError)  # worth retrying: the network, not our code
+TRANSIENT_ERRORS = (
+    ConnectionError,
+    TimeoutError,
+)  # worth retrying: the network, not our code
 
 SYSTEM_PROMPT = """You are a loan risk investigator at a UK lender.
 Investigate the referred application with your tools, then reply with a short recommendation.
@@ -40,7 +43,9 @@ Call independent tools together in one step."""
 
 def make_request(application: dict) -> HumanMessage:
     """The application travels in the first human message (the system prompt stays fixed)."""
-    return HumanMessage("Investigate this referred application:\n" + json.dumps(application))
+    return HumanMessage(
+        "Investigate this referred application:\n" + json.dumps(application)
+    )
 
 
 def on_tool_error(exc: Exception, request) -> str | None:
@@ -52,7 +57,9 @@ def on_tool_error(exc: Exception, request) -> str | None:
        exception text: it can leak internal details)
     - anything else (a bug: ValueError, KeyError...) -> return None, so it propagates and the
       run fails LOUDLY. Don't hide your own bugs from yourself."""
-    raise NotImplementedError
+    if isinstance(exc, TRANSIENT_ERRORS):
+        return f"`{request.tool_call['name']}` is unavailable right now ({type(exc).__name__}). Do not guess its data."
+    return None
 
 
 def build_agent(model=None, tools=TOOLS, retry_initial_delay: float = 1.0):
@@ -64,7 +71,25 @@ def build_agent(model=None, tools=TOOLS, retry_initial_delay: float = 1.0):
     Order matters: retry must sit INSIDE (after) error handling, so retries happen first and
     only the final failure reaches on_tool_error. (Tests pass retry_initial_delay=0 so they're fast.)
     If model is None: from loanlens.llm import get_model."""
-    raise NotImplementedError
+    if model is None:
+        from loanlens.llm import get_model
+
+        model = get_model()
+    return create_agent(
+        model=model,
+        tools=tools,
+        system_prompt=SYSTEM_PROMPT,
+        middleware=[
+            ToolErrorMiddleware(on_error=on_tool_error),
+            ToolRetryMiddleware(
+                max_retries=2,
+                retry_on=TRANSIENT_ERRORS,
+                on_failure="error",
+                initial_delay=retry_initial_delay,
+            ),
+            ModelCallLimitMiddleware(run_limit=MAX_MODEL_CALLS, exit_behavior="end"),
+        ],
+    )
 
 
 def apply_policy(messages: list[BaseMessage]) -> str:
@@ -75,4 +100,8 @@ def apply_policy(messages: list[BaseMessage]) -> str:
     - otherwise -> the FIRST line of the last message's content, stripped.
 
     Hint: ToolMessages carry .name (the tool) and .status ("success" or "error")."""
-    raise NotImplementedError
+    for m in messages:
+        if isinstance(m, ToolMessage) and m.name == "lookup_credit_file" and m.status == "error":
+            return "REFER TO SENIOR UNDERWRITER"
+    last_message = messages[-1]
+    return last_message.content.splitlines()[0].strip() if last_message.content else "REFER TO SENIOR UNDERWRITER"

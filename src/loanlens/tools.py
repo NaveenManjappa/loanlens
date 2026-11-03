@@ -19,7 +19,13 @@ MAX_DEBT_TO_INCOME = 0.4  # LoanLens policy v0: monthly debts incl. new loan <= 
 
 _CREDIT_FILES = {
     "priya shah": {"credit_score": 870, "missed_payments_12m": 0, "existing_monthly_debt": 150},
-    "sam jones": {"credit_score": 640, "missed_payments_12m": 2, "existing_monthly_debt": 450},
+    "sam jones": {
+        "credit_score": 640,
+        "missed_payments_12m": 2,
+        "existing_monthly_debt": 450,
+        # Real bureau files carry bank details. The model must never see these (Lesson 7).
+        "bank_details": {"sort_code": "20-45-77", "account_number": "41234567"},
+    },
     "tom reid": {"credit_score": 910, "missed_payments_12m": 0, "existing_monthly_debt": 0},
 }
 _VERIFIED_SELF_EMPLOYED_INCOME = {
