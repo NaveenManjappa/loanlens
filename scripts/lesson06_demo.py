@@ -34,7 +34,7 @@ def lookup_credit_file(applicant_name: str) -> dict:
 
 def show(title, agent):
     print(f"\n════ {title} ════")
-    messages = agent.invoke({"messages": [make_request(SAM)]}, {"recursion_limit": 25})["messages"]
+    messages = agent.invoke({"messages": [make_request(SAM)]}, {"recursion_limit": 100})["messages"]
     for m in messages[1:]:
         if m.type == "ai" and m.tool_calls:
             for c in m.tool_calls:

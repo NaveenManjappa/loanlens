@@ -31,13 +31,13 @@ from langchain_core.messages import HumanMessage
 #   - D F I Q U V are never the 1st or 2nd letter;  O is never the 2nd letter
 #   - prefixes BG GB KN NK NT TN ZZ are never used
 #   hint: a negative lookahead (?!BG|GB|...) handles the banned prefixes
-NINO_PATTERN = r"TODO"
+NINO_PATTERN = r"\b(?!BG|GB|KN|NK|NT|TN|ZZ)[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z]\s?\d{2}\s?\d{2}\s?\d{2}\s?[A-D]\b"
 
 # UK sort code: three pairs of digits separated by hyphens, e.g. 20-45-77
-SORT_CODE_PATTERN = r"TODO"
+SORT_CODE_PATTERN = r"\b\d{2}-\d{2}-\d{2}\b"
 
 # UK bank account number: exactly 8 digits on their own, e.g. 41234567
-ACCOUNT_NUMBER_PATTERN = r"TODO"
+ACCOUNT_NUMBER_PATTERN = r"\b\d{8}\b"
 
 # Email (given): good enough for redaction, not for validation
 EMAIL_PATTERN = r"\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b"
@@ -58,14 +58,23 @@ def _find(pii_type: str, text: str) -> list[dict]:
 
 def find_pii(text: str) -> list[dict]:
     """Every PII match of every type, sorted by position."""
-    return sorted((m for t in PII_PATTERNS for m in _find(t, text)), key=lambda m: m["start"])
+    matches = []
+    for pii_type in PII_PATTERNS:
+        matches.extend(_find(pii_type, text))
+
+    matches.sort(key=lambda match: match["start"])
+    return matches
 
 
 def redact(text: str) -> str:
     """Replace every match from find_pii(text) with "[REDACTED_<TYPE>]", type upper-cased,
     e.g. "[REDACTED_UK_NINO]" (the same format LangChain's PIIMiddleware uses).
     Hint: replace from the END of the string backwards, so earlier start/end offsets stay valid."""
-    raise NotImplementedError
+    matches = find_pii(text)
+    for match in reversed(matches):
+        start, end, pii_type = match["start"], match["end"], match["type"].upper()
+        text = text[:start] + f"[REDACTED_{pii_type}]" + text[end:]
+    return text
 
 
 def redact_at_boundary(user_text: str) -> HumanMessage:
@@ -78,7 +87,14 @@ def redact_pii(state) -> dict:
     contains PII, return a NEW HumanMessage with the redacted content and the SAME id.
     Same id = add_messages REPLACES the original instead of appending (Lesson 2!).
     Return {"messages": [the replacements]} (an empty list if there was nothing to redact)."""
-    raise NotImplementedError
+    out = []
+    for m in state["messages"]:
+        if isinstance(m,HumanMessage):
+            redacted_msg=redact(m.content)
+            if redacted_msg != m.content:
+                out.append(HumanMessage(content=redacted_msg,id=m.id)
+                           )
+    return {"messages":out}
 
 
 # ── For create_agent (Lesson 6's investigator) ─────────────────────────────
@@ -95,4 +111,7 @@ def pii_middleware() -> list:
                       apply_to_input=True, apply_to_tool_results=True)
     apply_to_tool_results is the important one: the credit bureau returns bank details
     the model must never see."""
-    raise NotImplementedError
+    middlewares=[]
+    for pattern in PII_PATTERNS:
+        middlewares.append(PIIMiddleware(pii_type=pattern,detector=detector(pattern),strategy="redact",apply_to_input=True,apply_to_tool_results=True))
+    return middlewares

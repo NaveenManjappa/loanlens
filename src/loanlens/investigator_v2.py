@@ -26,7 +26,7 @@ from langchain.agents.middleware import (  # noqa: F401
 from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage
 
 from loanlens.tools import TOOLS
-
+from loanlens.pii import pii_middleware
 MAX_MODEL_CALLS = 6  # hard cap: 6 model calls = up to 5 tool rounds + a final answer (same budget as Lesson 5)
 TRANSIENT_ERRORS = (
     ConnectionError,
@@ -80,6 +80,7 @@ def build_agent(model=None, tools=TOOLS, retry_initial_delay: float = 1.0):
         tools=tools,
         system_prompt=SYSTEM_PROMPT,
         middleware=[
+            *pii_middleware(),
             ToolErrorMiddleware(on_error=on_tool_error),
             ToolRetryMiddleware(
                 max_retries=2,

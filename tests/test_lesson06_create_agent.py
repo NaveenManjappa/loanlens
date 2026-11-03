@@ -158,7 +158,7 @@ def test_live_agent_handles_a_bureau_outage():
     bureau, attempts = make_failing_bureau(ConnectionError)
     others = [t for t in TOOLS if t.name != "lookup_credit_file"]
     messages = build_agent(tools=[bureau, *others], retry_initial_delay=0).invoke(
-        {"messages": [make_request(SAM)]}, {"recursion_limit": 25}
+        {"messages": [make_request(SAM)]}, {"recursion_limit": 100}
     )["messages"]
     assert attempts["n"] >= 3
     assert apply_policy(messages) == "REFER TO SENIOR UNDERWRITER"

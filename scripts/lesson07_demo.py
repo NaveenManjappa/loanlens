@@ -45,7 +45,7 @@ for label, first_message in [("in-graph only", HumanMessage(RAW)), ("boundary fi
 print("\n══ 3. The investigator: bureau returns bank details, the model must not see them ══")
 sam = {"applicant_name": "Sam Jones", "age": 29, "annual_income": 33_600, "loan_amount": 20_000,
        "employment_status": "self_employed"}
-msgs = build_agent().invoke({"messages": [make_request(sam)]}, {"recursion_limit": 25})["messages"]
+msgs = build_agent().invoke({"messages": [make_request(sam)]}, {"recursion_limit": 100})["messages"]
 for m in msgs:
     if m.type == "tool" and m.name == "lookup_credit_file":
         print("credit file as the model saw it:", m.content)
