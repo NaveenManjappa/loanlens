@@ -28,7 +28,7 @@ from loanlens.extraction import make_extract_node  # noqa: F401
 from loanlens.intake import validate_application  # noqa: F401
 from loanlens.screening import check_affordability, check_age, check_employment, combine  # noqa: F401
 from loanlens.pii import redact_pii
-
+from loanlens.cases import start_run  # noqa: F401
 SCREENING_CHECKS = ["check_affordability", "check_age", "check_employment"]
 
 
@@ -115,7 +115,7 @@ def approve_in_principle(state: PipelineState) -> dict:
     }
 
 
-def build_graph(model=None):
+def build_graph(model=None,checkpointer=None):
     """Nodes: extract_details (make_extract_node(model)), validate_application,
     the 3 checks, combine, request_missing_info, decline, refer_to_underwriter,
     approve_in_principle.
@@ -134,6 +134,7 @@ def build_graph(model=None):
         model = get_model()
     builder = StateGraph(PipelineState)
     builder.add_node(make_extract_node(model))
+    builder.add_node(start_run)
     builder.add_node(redact_pii)
     builder.add_node(validate_application)
     builder.add_node(check_affordability)
@@ -145,7 +146,8 @@ def build_graph(model=None):
     builder.add_node(refer_to_underwriter)
     builder.add_node(approve_in_principle)
 
-    builder.add_edge(START,"redact_pii")
+    builder.add_edge(START,"start_run")
+    builder.add_edge("start_run","redact_pii")
     builder.add_edge("redact_pii","extract_details")
     builder.add_edge("extract_details","validate_application")
     #builder.add_edge("validate_application","check_affordability")
@@ -163,7 +165,7 @@ def build_graph(model=None):
     
     
 
-    graph = builder.compile()
+    graph = builder.compile(checkpointer=checkpointer)
     
     return graph
 

@@ -26,7 +26,11 @@ def start_run(state) -> dict:
         "decision_hint": None
         "outcome":       "in_progress"
     Never touch "messages": that's the case's memory."""
-    raise NotImplementedError
+    return {
+        "risk_flags":Overwrite([]),
+        "outcome":"in_progress",
+        "decision_hint":None
+    }
 
 
 def thread_config(thread_id: str) -> dict:
@@ -37,16 +41,23 @@ def continue_application(graph, thread_id: str, text: str) -> dict:
     """Send one applicant message into their case and return the final state.
     Redact at the BOUNDARY (Lesson 7) so raw PII never reaches a checkpoint:
         graph.invoke({"messages": [redact_at_boundary(text)]}, thread_config(thread_id))"""
-    raise NotImplementedError
+    return graph.invoke({"messages":[redact_at_boundary(text)]},thread_config(thread_id))
+    
+    #return graph.invoke({"messages":[redact_at_boundary(text)]},thread_config(thread_id))
 
 
 def current_outcome(graph, thread_id: str) -> str | None:
     """Read the case WITHOUT running anything: graph.get_state(config).values.get("outcome")."""
-    raise NotImplementedError
+    return graph.get_state(thread_config(thread_id)).values.get("outcome")
 
 
 def decisions_made(graph, thread_id: str) -> list[str]:
     """The case's audit trail: the outcome of every COMPLETED run, oldest first.
     graph.get_state_history(config) yields snapshots NEWEST first. A snapshot whose
     .next is empty () is the end of a run. Collect .values["outcome"] from those, then reverse."""
-    raise NotImplementedError
+    outcomes = []
+    for snapshot in graph.get_state_history(thread_config(thread_id)):
+        if not snapshot.next:
+            outcomes.append(snapshot.values["outcome"])
+    return list(reversed(outcomes))
+    
