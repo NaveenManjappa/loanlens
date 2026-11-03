@@ -69,3 +69,40 @@ class FakeToolModel:
 @pytest.fixture
 def fake_tool_model():
     return FakeToolModel
+
+
+# ── Lesson 6: create_agent needs a REAL chat-model class, so this fake subclasses BaseChatModel ──
+
+from langchain_core.language_models.chat_models import BaseChatModel  # noqa: E402
+from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
+
+
+class ScriptedChatModel(BaseChatModel):
+    """A BaseChatModel that replays a script of AIMessages (last one repeats).
+    `calls` records every message list it was sent; `bound_tools` the tool names."""
+
+    script: list
+    calls: list = []
+    bound_tools: list = []
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted"
+
+    def bind_tools(self, tools, **kwargs):
+        self.bound_tools = [getattr(t, "name", t) for t in tools]
+        return self
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        self.calls.append(list(messages))
+        i = min(len(self.calls) - 1, len(self.script) - 1)
+        msg = self.script[i].model_copy(update={"id": str(uuid.uuid4())})
+        return ChatResult(generations=[ChatGeneration(message=msg)])
+
+
+@pytest.fixture
+def scripted_model():
+    def make(script):
+        return ScriptedChatModel(script=list(script), calls=[], bound_tools=[])
+
+    return make
