@@ -106,3 +106,31 @@ def scripted_model():
         return ScriptedChatModel(script=list(script), calls=[], bound_tools=[])
 
     return make
+
+
+class ScriptedStructuredModel(FakeStructuredModel):
+    """Like FakeStructuredModel, but answers from a LIST, one per call (last one repeats).
+    `all_sent` records the messages of every call. Lesson 8: one model across several runs."""
+
+    def __init__(self, answers):
+        super().__init__(answers[0])
+        self.answers = list(answers)
+        self.all_sent = []
+
+    def with_structured_output(self, schema, **kwargs):
+        self.schema = schema
+        fake = self
+
+        class _Runnable:
+            def invoke(self, messages, *args, **kw):
+                fake.all_sent.append(list(messages))
+                fake.sent = messages
+                i = min(len(fake.all_sent) - 1, len(fake.answers) - 1)
+                return fake.answers[i]
+
+        return _Runnable()
+
+
+@pytest.fixture
+def scripted_structured_model():
+    return ScriptedStructuredModel
