@@ -42,9 +42,6 @@ def continue_application(graph, thread_id: str, text: str) -> dict:
     Redact at the BOUNDARY (Lesson 7) so raw PII never reaches a checkpoint:
         graph.invoke({"messages": [redact_at_boundary(text)]}, thread_config(thread_id))"""
     return graph.invoke({"messages":[redact_at_boundary(text)]},thread_config(thread_id))
-    
-    #return graph.invoke({"messages":[redact_at_boundary(text)]},thread_config(thread_id))
-
 
 def current_outcome(graph, thread_id: str) -> str | None:
     """Read the case WITHOUT running anything: graph.get_state(config).values.get("outcome")."""
