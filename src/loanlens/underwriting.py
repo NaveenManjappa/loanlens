@@ -23,6 +23,7 @@ from langchain_core.messages import AIMessage
 from langgraph.types import Command, interrupt  # noqa: F401
 
 from loanlens.cases import thread_config  # noqa: F401
+from loanlens.pii import redact_at_boundary  # noqa: F401
 
 ALLOWED_DECISIONS = ("approve", "decline")
 
@@ -32,12 +33,11 @@ def review_payload(state) -> dict:
     Return {"application": ..., "risk_flags": ..., "error": state.get("review_error")}
     (the application is already PII-redacted: Lesson 7). Must be JSON-serialisable."""
     return {
-        "application":state["application"],
-        "risk_flags":state["risk_flags"],
-        "error":state.get("review_error"),
-        "applicant_updates":state.get("held_messages", []),
+        "application": state["application"],
+        "risk_flags": state["risk_flags"],
+        "error": state.get("review_error"),
+        "applicant_updates": state.get("held_messages", []),
     }
-
 
 
 def validate_decision(decision) -> str | None:
@@ -69,8 +69,9 @@ def underwriter_review(state) -> dict:
     return {"underwriter_decision": decision, "review_error": None}
 
 
-
-def route_after_review(state) -> Literal["underwriter_review", "approve_in_principle", "underwriter_decline"]:
+def route_after_review(
+    state,
+) -> Literal["underwriter_review", "approve_in_principle", "underwriter_decline"]:
     """review_error set                  -> "underwriter_review"  (ask again)
     underwriter_decision["decision"] == "approve" -> "approve_in_principle"
     otherwise                            -> "underwriter_decline\""""
@@ -84,7 +85,11 @@ def route_after_review(state) -> Literal["underwriter_review", "approve_in_princ
 def underwriter_decline(state) -> dict:
     return {
         "outcome": "declined_by_underwriter",
-        "messages": [AIMessage("After review by our underwriting team, we're unable to offer this loan.")],
+        "messages": [
+            AIMessage(
+                "After review by our underwriting team, we're unable to offer this loan."
+            )
+        ],
     }
 
 
@@ -99,8 +104,10 @@ def awaiting_underwriter(graph, thread_id: str) -> dict | None:
     for task in state.tasks:
         if task.interrupts:
             return task.interrupts[0].value
-    if state.next == ("underwriter_review",):        # paused, but the marker was lost by update_state
-        return review_payload(state.values)          # rebuild what the underwriter needs to see
+    if state.next == (
+        "underwriter_review",
+    ):  # paused, but the marker was lost by update_state
+        return review_payload(state.values)  # rebuild what the underwriter needs to see
     return None
 
 
@@ -109,9 +116,12 @@ def submit_decision(graph, thread_id: str, decision: dict) -> dict:
     graph.invoke(Command(resume=decision), thread_config(thread_id))"""
     return graph.invoke(Command(resume=decision), thread_config(thread_id))
 
+
 def hold_for_underwriter(graph, thread_id: str, text: str) -> None:
     """Hold a message from the applicant for the underwriter to see, without running the extractor again.
     (The extractor is only called once per case, when the applicant first applies.)"""
-    from loanlens.cases import redact_at_boundary  # avoid circular import
+    # avoid circular import
     msg = redact_at_boundary(text)
-    graph.update_state(thread_config(thread_id), {"messages": [msg], "held_messages": [msg.content]})
+    graph.update_state(
+        thread_config(thread_id), {"messages": [msg], "held_messages": [msg.content]}
+    )

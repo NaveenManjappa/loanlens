@@ -47,7 +47,7 @@ def continue_application(graph, thread_id: str, text: str) -> dict:
         from loanlens.underwriting import hold_for_underwriter  # avoid circular import
         hold_for_underwriter(graph, thread_id, text)
         return graph.get_state(thread_config(thread_id)).values
-    from loanlens.cases import redact_at_boundary  # avoid circular import
+    
     return graph.invoke({"messages":[redact_at_boundary(text)]},thread_config(thread_id))
 
 def current_outcome(graph, thread_id: str) -> str | None:
