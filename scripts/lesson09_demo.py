@@ -22,6 +22,7 @@ from loanlens.underwriting import awaiting_underwriter, submit_decision  # noqa:
 
 CASE = "case-sam-jones"
 graph = build_graph(checkpointer=SqliteSaver(sqlite3.connect(ROOT / "loanlens_cases.db", check_same_thread=False)))
+#print(graph.get_graph().draw_mermaid())
 cmd = sys.argv[1] if len(sys.argv) > 1 else "apply"
 
 if cmd == "apply":

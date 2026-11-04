@@ -31,7 +31,13 @@ def review_payload(state) -> dict:
     """What the underwriter's screen shows: everything they need to decide, nothing more.
     Return {"application": ..., "risk_flags": ..., "error": state.get("review_error")}
     (the application is already PII-redacted: Lesson 7). Must be JSON-serialisable."""
-    raise NotImplementedError
+    return {
+        "application":state["application"],
+        "risk_flags":state["risk_flags"],
+        "error":state.get("review_error"),
+        "applicant_updates":state.get("held_messages", []),
+    }
+
 
 
 def validate_decision(decision) -> str | None:
@@ -56,14 +62,23 @@ def underwriter_review(state) -> dict:
       valid                                      -> return {"underwriter_decision": decision, "review_error": None}
     Remember: on resume this node RE-RUNS FROM ITS FIRST LINE. Keep everything before
     interrupt() side-effect free (no emails, no database writes)."""
-    raise NotImplementedError
+    decision = interrupt(review_payload(state))
+    error = validate_decision(decision)
+    if error:
+        return {"review_error": error}
+    return {"underwriter_decision": decision, "review_error": None}
+
 
 
 def route_after_review(state) -> Literal["underwriter_review", "approve_in_principle", "underwriter_decline"]:
     """review_error set                  -> "underwriter_review"  (ask again)
     underwriter_decision["decision"] == "approve" -> "approve_in_principle"
     otherwise                            -> "underwriter_decline\""""
-    raise NotImplementedError
+    if state.get("review_error"):
+        return "underwriter_review"
+    if state.get("underwriter_decision")["decision"] == "approve":
+        return "approve_in_principle"
+    return "underwriter_decline"
 
 
 def underwriter_decline(state) -> dict:
@@ -80,10 +95,23 @@ def awaiting_underwriter(graph, thread_id: str) -> dict | None:
     """If the case is paused at an interrupt, return its payload, else None.
     graph.get_state(config).tasks is a tuple of tasks; a paused task has a non-empty
     .interrupts tuple, and each Interrupt has a .value (your review_payload)."""
-    raise NotImplementedError
+    state = graph.get_state(thread_config(thread_id))
+    for task in state.tasks:
+        if task.interrupts:
+            return task.interrupts[0].value
+    if state.next == ("underwriter_review",):        # paused, but the marker was lost by update_state
+        return review_payload(state.values)          # rebuild what the underwriter needs to see
+    return None
 
 
 def submit_decision(graph, thread_id: str, decision: dict) -> dict:
     """Resume the paused case with the underwriter's decision and return the result:
     graph.invoke(Command(resume=decision), thread_config(thread_id))"""
-    raise NotImplementedError
+    return graph.invoke(Command(resume=decision), thread_config(thread_id))
+
+def hold_for_underwriter(graph, thread_id: str, text: str) -> None:
+    """Hold a message from the applicant for the underwriter to see, without running the extractor again.
+    (The extractor is only called once per case, when the applicant first applies.)"""
+    from loanlens.cases import redact_at_boundary  # avoid circular import
+    msg = redact_at_boundary(text)
+    graph.update_state(thread_config(thread_id), {"messages": [msg], "held_messages": [msg.content]})

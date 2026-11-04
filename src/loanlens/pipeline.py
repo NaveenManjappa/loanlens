@@ -28,7 +28,8 @@ from loanlens.extraction import make_extract_node  # noqa: F401
 from loanlens.intake import validate_application  # noqa: F401
 from loanlens.screening import check_affordability, check_age, check_employment, combine  # noqa: F401
 from loanlens.pii import redact_pii
-from loanlens.cases import start_run  # noqa: F401
+from loanlens.cases import start_run
+from loanlens.underwriting import route_after_review, underwriter_decline, underwriter_review  # noqa: F401
 SCREENING_CHECKS = ["check_affordability", "check_age", "check_employment"]
 
 
@@ -39,7 +40,9 @@ class PipelineState(MessagesState, total=False):
     risk_flags: Annotated[list[str], add]
     decision_hint: str
     outcome: str  # "awaiting_information" | "declined" | "referred" | "approved_in_principle"
-
+    underwriter_decision:dict
+    review_error:str | None
+    held_messages: Annotated[list[str], add]
 
 # ── Routers: read state, return WHERE to go next. They never update state. ──
 
@@ -145,6 +148,8 @@ def build_graph(model=None,checkpointer=None):
     builder.add_node(decline)
     builder.add_node(refer_to_underwriter)
     builder.add_node(approve_in_principle)
+    builder.add_node(underwriter_review)
+    builder.add_node(underwriter_decline)
 
     builder.add_edge(START,"start_run")
     builder.add_edge("start_run","redact_pii")
@@ -160,7 +165,9 @@ def build_graph(model=None,checkpointer=None):
     builder.add_conditional_edges("combine",route_after_screening)
     builder.add_edge("request_missing_info",END)
     builder.add_edge("decline",END)
-    builder.add_edge("refer_to_underwriter",END)
+    builder.add_edge("refer_to_underwriter","underwriter_review")
+    builder.add_conditional_edges("underwriter_review",route_after_review)
+    builder.add_edge("underwriter_decline",END)
     builder.add_edge("approve_in_principle",END)
     
     

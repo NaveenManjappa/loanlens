@@ -15,6 +15,10 @@ SAM_SELF_EMPLOYED = ApplicationDetails(
     applicant_name="Sam Jones", age=29, annual_income=40_000, loan_amount=5_000, employment_status="self_employed"
 )
 SAM_NOW_EMPLOYED = SAM_SELF_EMPLOYED.model_copy(update={"employment_status": "employed"})
+ALEX_17 = ApplicationDetails(
+    applicant_name="Alex Kim", age=17, annual_income=30_000, loan_amount=2_000, employment_status="employed"
+)
+ALEX_18 = ALEX_17.model_copy(update={"age": 18})
 
 
 def pipeline(fake):
@@ -67,11 +71,13 @@ def test_without_a_checkpointer_nothing_is_remembered(scripted_structured_model)
 
 
 def test_yesterdays_flags_do_not_leak_into_todays_decision(scripted_structured_model):
-    graph = pipeline(scripted_structured_model([SAM_SELF_EMPLOYED, SAM_NOW_EMPLOYED]))
-    first = continue_application(graph, "case-sam", "Sam, 29, self-employed, £40k, want £5k")
-    assert first["outcome"] == "referred"
-    second = continue_application(graph, "case-sam", "Update: I've taken a salaried job.")
-    assert second["risk_flags"] == [], "the self-employed flag belongs to the OLD run"
+    # (Updated in Lesson 9: a REFERRED case now pauses for the underwriter, so this test uses a
+    #  declined case instead, which finishes and leaves its flags behind in the checkpoint.)
+    graph = pipeline(scripted_structured_model([ALEX_17, ALEX_18]))
+    first = continue_application(graph, "case-alex", "Alex, 17, employed, £30k, want £2k")
+    assert first["outcome"] == "declined" and first["risk_flags"] == ["under_18"]
+    second = continue_application(graph, "case-alex", "Sorry, typo: I'm 18.")
+    assert second["risk_flags"] == [], "the under_18 flag belongs to the OLD run"
     assert second["outcome"] == "approved_in_principle"
 
 

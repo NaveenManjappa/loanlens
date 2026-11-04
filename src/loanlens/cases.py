@@ -17,7 +17,7 @@ YOUR JOB:  uv run pytest tests/test_lesson08_persistence.py -v  -> green
 
 from langgraph.types import Overwrite  # noqa: F401
 
-from loanlens.pii import redact_at_boundary  # noqa: F401
+from loanlens.pii import redact_at_boundary# noqa: F401
 
 
 def start_run(state) -> dict:
@@ -29,7 +29,8 @@ def start_run(state) -> dict:
     return {
         "risk_flags":Overwrite([]),
         "outcome":"in_progress",
-        "decision_hint":None
+        "decision_hint":None,
+        "held_messages":Overwrite([])
     }
 
 
@@ -41,6 +42,12 @@ def continue_application(graph, thread_id: str, text: str) -> dict:
     """Send one applicant message into their case and return the final state.
     Redact at the BOUNDARY (Lesson 7) so raw PII never reaches a checkpoint:
         graph.invoke({"messages": [redact_at_boundary(text)]}, thread_config(thread_id))"""
+    from loanlens.underwriting import awaiting_underwriter  # avoid circular import
+    if awaiting_underwriter(graph, thread_id):
+        from loanlens.underwriting import hold_for_underwriter  # avoid circular import
+        hold_for_underwriter(graph, thread_id, text)
+        return graph.get_state(thread_config(thread_id)).values
+    from loanlens.cases import redact_at_boundary  # avoid circular import
     return graph.invoke({"messages":[redact_at_boundary(text)]},thread_config(thread_id))
 
 def current_outcome(graph, thread_id: str) -> str | None:
