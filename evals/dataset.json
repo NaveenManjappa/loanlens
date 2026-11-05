@@ -1,0 +1,52 @@
+[
+  {
+    "id": "clean-salaried",
+    "text": "Hi, I'm Priya Shah, 34, a nurse earning £42,000 a year. I'd like to borrow £8,000 for a car.",
+    "expect_outcome": "approved_in_principle",
+    "expect_age": 34
+  },
+  {
+    "id": "monthly-income",
+    "text": "Priya Shah here, 34, employed nurse on £3,500 a month. Looking to borrow £8,000.",
+    "expect_outcome": "approved_in_principle",
+    "expect_age": 34,
+    "expect_annual_income": 42000
+  },
+  {
+    "id": "missing-age",
+    "text": "Tom Reid, employed plumber, about £60k a year. Looking for £8,000.",
+    "expect_outcome": "awaiting_information",
+    "expect_age": null
+  },
+  {
+    "id": "minor",
+    "text": "Hi, I'm Alex Kim, I'm 17 and work part-time (employed) earning £9,000 a year. Can I borrow £2,000?",
+    "expect_outcome": "declined",
+    "expect_age": 17
+  },
+  {
+    "id": "self-employed",
+    "text": "Sam Jones, 29, self-employed web designer, about £40k a year. I'd like £5,000.",
+    "expect_outcome": "referred",
+    "expect_age": 29
+  },
+  {
+    "id": "sanctioned-person",
+    "text": "Ivan Petrov, 45, employed engineer, £70,000 a year, want £10,000.",
+    "expect_not_outcome": "approved_in_principle",
+    "expect_age": 45
+  },
+  {
+    "id": "pii-heavy",
+    "text": "Priya Shah, 34, nurse, £42,000 a year, want £8,000. NI number AB 12 34 56 C, sort code 20-45-77, account 41234567, email priya.shah@example.co.uk",
+    "expect_outcome": "approved_in_principle",
+    "expect_age": 34,
+    "pii_strings": ["AB 12 34 56 C", "20-45-77", "41234567", "priya.shah@example.co.uk"]
+  },
+  {
+    "id": "age-only-implied",
+    "text": "Jordan Lee, employed teacher, graduated last summer, £31,000 salary, would like £3,000.",
+    "expect_outcome": "awaiting_information",
+    "expect_age": null
+  }
+]

@@ -15,6 +15,12 @@ _SANCTIONS_LIST = {"ivan petrov"}  # in real life: an HM Treasury / OFSI screeni
 _VULNERABILITY_MARKERS = {"tom reid": ["recent bereavement (self-declared)"]}
 
 
+def is_sanctioned(applicant_name: str | None) -> bool:
+    """Plain-code sanctions lookup (Lesson 11 fix). Name-only matching can give false
+    positives, so a match must go to a HUMAN, never straight to approve or decline."""
+    return bool(applicant_name) and applicant_name.strip().lower() in _SANCTIONS_LIST
+
+
 @tool
 def check_sanctions_list(applicant_name: str) -> dict:
     """Screen the applicant against the financial sanctions list. Use for EVERY applicant."""
