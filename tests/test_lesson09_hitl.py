@@ -43,7 +43,7 @@ def referred_case(fake):
 
 def test_review_payload_shows_what_the_underwriter_needs():
     p = review_payload({"application": {"age": 29}, "risk_flags": ["x"], "messages": ["..."]})
-    assert p == {"application": {"age": 29}, "risk_flags": ["x"], "error": None, "applicant_updates": []}
+    assert p == {"application": {"age": 29}, "risk_flags": ["x"], "error": None, "applicant_updates": [], "specialist_reports": {}}
 
 
 def test_route_after_review():
