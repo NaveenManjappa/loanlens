@@ -22,7 +22,7 @@ from loanlens.investigator_v2 import apply_policy, make_request  # noqa: F401
 def merge_reports(left: dict | None, right: dict | None) -> dict:
     """Reducer for specialist_reports. Two specialists write in the SAME super-step (Lesson 2),
     each returning {"<its name>": report}. Merge them: {**left, **right}. Treat None as {}."""
-    raise NotImplementedError
+    return {**(left or {}), **(right or {})}
 
 
 def first_line(messages) -> str:
@@ -41,7 +41,27 @@ def make_specialist_node(name: str, agent, verdict=first_line):
              "tools_used": the names of every ToolMessage in result["messages"], in order,
          }}}
     Never return "messages": the applicant's conversation must not see the agent's working."""
-    raise NotImplementedError
+
+    def node(state):
+        private_input = {"messages": [make_request(state["application"])]}
+        result = agent.invoke(private_input, {"recursion_limit": 100})
+        final_message = result["messages"][-1]
+        tools_used = [
+            msg.name
+            for msg in result["messages"]
+            if isinstance(msg, ToolMessage)
+        ]
+        return {
+            "specialist_reports": {
+                name: {
+                    "verdict": verdict(result["messages"]),
+                    "memo": str(final_message.content),
+                    "tools_used": tools_used,
+                }
+            }
+        }
+
+    return node
 
 
 def default_specialists(model=None) -> dict:
@@ -49,4 +69,12 @@ def default_specialists(model=None) -> dict:
         {"risk": (build_agent(model), apply_policy),          # Lesson 6 investigator + policy in code
          "compliance": (build_compliance_agent(model), first_line)}
     Import build_agent / build_compliance_agent inside the function."""
-    raise NotImplementedError
+    from loanlens.investigator_v2 import build_agent  # avoid circular import
+    from loanlens.compliance import (
+        build_compliance_agent,
+    )  # avoid circular import
+
+    return {
+        "risk": (build_agent(model), apply_policy),
+        "compliance": (build_compliance_agent(model), first_line),
+    }

@@ -37,6 +37,7 @@ def review_payload(state) -> dict:
         "risk_flags": state["risk_flags"],
         "error": state.get("review_error"),
         "applicant_updates": state.get("held_messages", []),
+        "specialist_reports": state.get("specialist_reports", {}),
     }
 
 

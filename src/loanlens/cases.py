@@ -30,7 +30,8 @@ def start_run(state) -> dict:
         "risk_flags":Overwrite([]),
         "outcome":"in_progress",
         "decision_hint":None,
-        "held_messages":Overwrite([])
+        "held_messages":Overwrite([]),
+        "specialist_reports":Overwrite({})
     }
 
 

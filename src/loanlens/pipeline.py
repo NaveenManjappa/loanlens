@@ -29,6 +29,7 @@ from loanlens.intake import validate_application  # noqa: F401
 from loanlens.screening import check_affordability, check_age, check_employment, combine  # noqa: F401
 from loanlens.pii import redact_pii
 from loanlens.cases import start_run
+from loanlens.specialists import default_specialists, make_specialist_node, merge_reports
 from loanlens.underwriting import route_after_review, underwriter_decline, underwriter_review  # noqa: F401
 SCREENING_CHECKS = ["check_affordability", "check_age", "check_employment"]
 
@@ -43,6 +44,7 @@ class PipelineState(MessagesState, total=False):
     underwriter_decision:dict
     review_error:str | None
     held_messages: Annotated[list[str], add]
+    specialist_reports: Annotated[dict, merge_reports]
 
 # ── Routers: read state, return WHERE to go next. They never update state. ──
 
@@ -118,7 +120,7 @@ def approve_in_principle(state: PipelineState) -> dict:
     }
 
 
-def build_graph(model=None,checkpointer=None):
+def build_graph(model=None,checkpointer=None,specialists=None):
     """Nodes: extract_details (make_extract_node(model)), validate_application,
     the 3 checks, combine, request_missing_info, decline, refer_to_underwriter,
     approve_in_principle.
@@ -132,9 +134,22 @@ def build_graph(model=None,checkpointer=None):
                    ...and one more add_conditional_edges after "combine".
 
     If model is None, use get_model() (import inside the function, like Lesson 3)."""
-    if not model:
+    use_default_specialists = model is None
+    if model is None:
         from loanlens.llm import get_model
         model = get_model()
+    #ToDO:  add specialists to the graph, as in Lesson 10. See the comments in tests/test_lesson10_multi_agent.py:
+    # build_graph(model=None, checkpointer=None, specialists=None)
+    #     specialists is a dict {name: (agent, verdict_fn)}.
+    #     If specialists is None:  use default_specialists() ONLY when model is None (the real app);
+    #                              when a test passes a fake model, use {} (no specialists).
+    #     For each specialist: add_node(f"{name}_specialist", make_specialist_node(name, agent, verdict))
+    #     Wiring:   with specialists:  refer_to_underwriter -> each specialist -> underwriter_review
+    #               without:           refer_to_underwriter -> underwriter_review   (as in Lesson 9)
+    if specialists is None:
+        specialists = default_specialists(model) if use_default_specialists else {}
+
+
     builder = StateGraph(PipelineState)
     builder.add_node(make_extract_node(model))
     builder.add_node(start_run)
@@ -151,6 +166,8 @@ def build_graph(model=None,checkpointer=None):
     builder.add_node(underwriter_review)
     builder.add_node(underwriter_decline)
 
+    
+
     builder.add_edge(START,"start_run")
     builder.add_edge("start_run","redact_pii")
     builder.add_edge("redact_pii","extract_details")
@@ -165,7 +182,13 @@ def build_graph(model=None,checkpointer=None):
     builder.add_conditional_edges("combine",route_after_screening)
     builder.add_edge("request_missing_info",END)
     builder.add_edge("decline",END)
-    builder.add_edge("refer_to_underwriter","underwriter_review")
+    if specialists:
+        for name, (agent, verdict) in specialists.items():
+            builder.add_node(f"{name}_specialist", make_specialist_node(name, agent, verdict))
+            builder.add_edge("refer_to_underwriter",f"{name}_specialist")
+            builder.add_edge(f"{name}_specialist","underwriter_review")
+    else:
+        builder.add_edge("refer_to_underwriter","underwriter_review")
     builder.add_conditional_edges("underwriter_review",route_after_review)
     builder.add_edge("underwriter_decline",END)
     builder.add_edge("approve_in_principle",END)
@@ -175,5 +198,4 @@ def build_graph(model=None,checkpointer=None):
     graph = builder.compile(checkpointer=checkpointer)
     
     return graph
-
 
