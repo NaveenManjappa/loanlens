@@ -16,7 +16,9 @@ from typing import Annotated  # noqa: F401  (you'll need this)
 from operator import add  # noqa: F401  (and probably this)
 
 from langchain_core.messages import AIMessage  # noqa: F401
-from langgraph.graph import END, START, MessagesState, StateGraph  # noqa: F401
+from langgraph.graph import END, START, MessagesState, StateGraph
+
+from loanlens.compliance import is_sanctioned
 
 # LoanLens policy v0 (made up for the course — every rule traces back to here)
 MIN_AGE = 18
@@ -86,7 +88,9 @@ def combine(state: ScreeningState) -> dict:
             )
         ],
     }
-
+def check_sanctions(state: ScreeningState) -> dict:
+    applicant_name = state["application"]["applicant_name"]
+    return {"risk_flags": ["sanctions_match"] if is_sanctioned(applicant_name) else []}
 
 def build_graph():
     """START fans out to all three checks; all three fan in to combine; combine -> END.
@@ -95,10 +99,13 @@ def build_graph():
     builder.add_node(check_affordability)
     builder.add_node(check_age)
     builder.add_node(check_employment)
+    builder.add_node(check_sanctions)
     builder.add_node(combine)
     builder.add_edge(START, "check_affordability")
     builder.add_edge(START, "check_age")
     builder.add_edge(START, "check_employment")
+    builder.add_edge(START, "check_sanctions")
+    builder.add_edge("check_sanctions", "combine")
     builder.add_edge("check_affordability", "combine")
     builder.add_edge("check_age", "combine")
     builder.add_edge("check_employment", "combine")

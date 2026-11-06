@@ -26,12 +26,12 @@ from langgraph.graph import END, START, MessagesState, StateGraph  # noqa: F401
 
 from loanlens.extraction import make_extract_node  # noqa: F401
 from loanlens.intake import validate_application  # noqa: F401
-from loanlens.screening import check_affordability, check_age, check_employment, combine  # noqa: F401
+from loanlens.screening import check_affordability, check_age, check_employment, check_sanctions, combine  # noqa: F401
 from loanlens.pii import redact_pii
 from loanlens.cases import start_run
 from loanlens.specialists import default_specialists, make_specialist_node, merge_reports
 from loanlens.underwriting import route_after_review, underwriter_decline, underwriter_review  # noqa: F401
-SCREENING_CHECKS = ["check_affordability", "check_age", "check_employment"]
+SCREENING_CHECKS = ["check_affordability", "check_age", "check_employment","check_sanctions"]
 
 
 class PipelineState(MessagesState, total=False):
@@ -157,6 +157,7 @@ def build_graph(model=None,checkpointer=None,specialists=None):
     builder.add_node(validate_application)
     builder.add_node(check_affordability)
     builder.add_node(check_employment)
+    builder.add_node(check_sanctions)
     builder.add_node(check_age)
     builder.add_node(combine)
     builder.add_node(request_missing_info)
@@ -179,6 +180,7 @@ def build_graph(model=None,checkpointer=None,specialists=None):
     builder.add_edge("check_affordability","combine")
     builder.add_edge("check_employment","combine")
     builder.add_edge("check_age","combine")
+    builder.add_edge("check_sanctions","combine")
     builder.add_conditional_edges("combine",route_after_screening)
     builder.add_edge("request_missing_info",END)
     builder.add_edge("decline",END)
