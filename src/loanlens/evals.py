@@ -20,6 +20,7 @@ from pathlib import Path
 from langchain_core.callbacks import BaseCallbackHandler, UsageMetadataCallbackHandler
 from langgraph.checkpoint.memory import InMemorySaver
 
+from loanlens.grounding import age_in_text
 from loanlens.pii import redact_at_boundary
 
 DATASET = Path(__file__).resolve().parents[2] / "evals" / "dataset.json"
@@ -103,10 +104,9 @@ def age_not_invented(case: dict, run: dict) -> bool | None:
       extracted age's digits appear in case["text"] -> True  (grounded, e.g. r"\\b34\\b")
       otherwise                                     -> False (the model made it up)
     Use run["application"].get("age")."""
-    extracted_age = run["application"].get("age")
-    if extracted_age is None:
-        return True
-    return re.search(rf"\b{extracted_age}\b", case["text"]) is not None
+    age = run["application"].get("age")
+    text = case["text"]
+    return age_in_text(age, text)
 
 
 def extraction_correct(case: dict, run: dict) -> bool | None:

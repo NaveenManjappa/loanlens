@@ -99,7 +99,7 @@ def test_everyone_is_screened(scripted_structured_model):
     graph = build_graph(scripted_structured_model([priya]), checkpointer=InMemorySaver())
     visited = []
     for step in graph.stream(
-        {"messages": [("user", "Priya...")]}, {"configurable": {"thread_id": "p"}}, stream_mode="updates"
+        {"messages": [("user", "Priya Shah, 34, employed nurse, £42,000 a year, want £8,000")]}, {"configurable": {"thread_id": "p"}}, stream_mode="updates"
     ):
         visited.extend(step)
     assert "check_sanctions" in visited, "sanctions screening must run for clean applicants too"

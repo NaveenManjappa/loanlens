@@ -25,6 +25,7 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, MessagesState, StateGraph  # noqa: F401
 
 from loanlens.extraction import make_extract_node  # noqa: F401
+from loanlens.grounding import ground_age
 from loanlens.intake import validate_application  # noqa: F401
 from loanlens.screening import check_affordability, check_age, check_employment, check_sanctions, combine  # noqa: F401
 from loanlens.pii import redact_pii
@@ -156,6 +157,7 @@ def build_graph(model=None,checkpointer=None,specialists=None):
     builder.add_node(redact_pii)
     builder.add_node(validate_application)
     builder.add_node(check_affordability)
+    builder.add_node(ground_age)
     builder.add_node(check_employment)
     builder.add_node(check_sanctions)
     builder.add_node(check_age)
@@ -172,7 +174,8 @@ def build_graph(model=None,checkpointer=None,specialists=None):
     builder.add_edge(START,"start_run")
     builder.add_edge("start_run","redact_pii")
     builder.add_edge("redact_pii","extract_details")
-    builder.add_edge("extract_details","validate_application")
+    builder.add_edge("extract_details","ground_age")
+    builder.add_edge("ground_age","validate_application")
     #builder.add_edge("validate_application","check_affordability")
     #builder.add_edge("validate_application","check_employment")
     #builder.add_edge("validate_application","check_age")

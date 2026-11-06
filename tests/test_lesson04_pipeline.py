@@ -23,13 +23,22 @@ SELF_EMPLOYED = CLEAN.model_copy(update={"employment_status": "self_employed"})
 MSG = [HumanMessage("(applicant's message; the fake model ignores it)")]
 
 
+def message_for(details):
+    """A realistic applicant message that says what the fake extractor 'finds'.
+    (Since Lesson 11's age guard, an age the applicant never typed is thrown away.)"""
+    age = f", {details.age}" if details.age is not None else ""
+    return [HumanMessage(f"I'm {details.applicant_name}{age}, {details.employment_status}, "
+                         f"£{details.annual_income:,.0f} a year, want £{details.loan_amount:,.0f}")]
+
+
 def run(fake_structured_model, details):
     """Run the pipeline and also record which nodes actually executed."""
     graph = build_graph(fake_structured_model(details))
+    msg = message_for(details)
     visited = []
-    for step in graph.stream({"messages": MSG}, stream_mode="updates"):
+    for step in graph.stream({"messages": msg}, stream_mode="updates"):
         visited.extend(step.keys())
-    final = graph.invoke({"messages": MSG})
+    final = graph.invoke({"messages": msg})
     return final, visited
 
 
