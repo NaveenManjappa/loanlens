@@ -1,0 +1,13 @@
+# Never ship secrets or local data in the image
+.env
+*.db
+*.db-*
+# Not needed at runtime
+.venv
+.git
+.pytest_cache
+__pycache__
+tests
+scripts
+evals
+docs

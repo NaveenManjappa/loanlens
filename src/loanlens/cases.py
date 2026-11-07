@@ -18,6 +18,7 @@ YOUR JOB:  uv run pytest tests/test_lesson08_persistence.py -v  -> green
 from langgraph.types import Overwrite  # noqa: F401
 
 from loanlens.pii import redact_at_boundary# noqa: F401
+from langchain_core.messages import AIMessage, HumanMessage  # noqa: F401
 
 
 def start_run(state) -> dict:
@@ -37,6 +38,37 @@ def start_run(state) -> dict:
 
 def thread_config(thread_id: str) -> dict:
     return {"configurable": {"thread_id": thread_id}}
+
+
+# ── Lesson 12: a message blocked by the content filter (ADR 0002) ──────────
+
+BLOCKED_REPLY = (
+    "Sorry, we couldn't process that message. "
+    "Please tell us about your loan application and we'll carry on from there."
+)
+WITHHELD = "[message withheld]"
+
+
+def is_content_filter_error(exc: BaseException) -> bool:
+    """True if exc means Azure's content filter refused the request:
+      - a blocked PROMPT:     an error whose .code == "content_filter" (Azure's HTTP 400)
+                              (use getattr(exc, "code", None): most exceptions have no .code)
+      - a blocked COMPLETION: an openai.ContentFilterFinishReasonError
+    Anything else -> False. Never swallow an error you don't understand."""
+    raise NotImplementedError
+
+
+def withhold_blocked_message(graph, thread_id: str) -> None:
+    """The run crashed, but the blocked message is ALREADY in the checkpoint. Repair the case:
+      1. find the LAST HumanMessage in graph.get_state(config).values["messages"]
+      2. graph.update_state(config,
+             {"messages": [HumanMessage(WITHHELD, id=<its id>), AIMessage(BLOCKED_REPLY)],
+              "outcome": "awaiting_information"},
+             as_node="request_missing_info")
+    Same id -> add_messages REPLACES the blocked message (the Lesson 7 trick).
+    as_node="request_missing_info" records the update as if LoanLens had asked for information,
+    so the case ends cleanly (.next == ()) and the next message starts a normal run."""
+    raise NotImplementedError
 
 
 def continue_application(graph, thread_id: str, text: str) -> dict:
