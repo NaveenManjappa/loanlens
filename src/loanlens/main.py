@@ -1,7 +1,11 @@
 """Lesson 12: the real app, as uvicorn runs it. Done for you.
 
-    uv run uvicorn loanlens.main:app --reload            (local: SQLite file)
-    DATABASE_URL=postgresql://... uvicorn loanlens.main:app   (deployed: Postgres)
+    uv run uvicorn loanlens.main:app --reload --app-dir src    (local: SQLite file)
+    DATABASE_URL=postgresql://... uvicorn loanlens.main:app      (deployed: Postgres; the
+                                                                  Dockerfile sets PYTHONPATH)
+
+--app-dir src: the project isn't installed as a package, so Python only finds `loanlens`
+if src/ is on its import path (pytest gets this from `pythonpath` in pyproject.toml).
 
 Configuration comes ONLY from environment variables (12-factor): the same image runs
 on your laptop and in Azure; only the environment differs. Secrets never go in the image.

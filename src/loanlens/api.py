@@ -64,7 +64,22 @@ def case_view(graph, case_id: str) -> dict | None:
       outcome              values.get("outcome")
       reply                content of the LAST AIMessage in values["messages"], or None if there isn't one
       awaiting_underwriter awaiting_underwriter(graph, case_id) is not None"""
-    raise NotImplementedError
+    state = graph.get_state(thread_config(case_id))
+    values = state.values
+    if not values:
+        return None
+
+    reply = None
+    for message in values.get("messages", []):
+        if isinstance(message, AIMessage):
+            reply = message.content
+
+    return {
+        "case_id": case_id,
+        "outcome": values.get("outcome"),
+        "reply": reply,
+        "awaiting_underwriter": awaiting_underwriter(graph, case_id) is not None,
+    }
 
 
 def create_app(graph=None, lifespan=None) -> FastAPI:
@@ -77,31 +92,45 @@ def create_app(graph=None, lifespan=None) -> FastAPI:
         """The model is down, rate-limited or unreachable. Return a 503 with
         {"detail": UNAVAILABLE}: a FIXED message. Never echo str(exc): error text can
         contain parts of the prompt, i.e. customer data. (Hint: JSONResponse.)"""
-        raise NotImplementedError
+        return JSONResponse(
+            status_code=503,
+            content={"detail": UNAVAILABLE},
+        )
 
     @app.get("/health")
     def health() -> dict:
-        raise NotImplementedError
+        """For Azure's health probes. Return {"status": "ok"}."""
+        return {"status": "ok"}
 
     @app.post("/cases/{case_id}/messages", response_model=CaseView)
     def send_message(body: MessageIn, case_id: str = CaseId, graph=Depends(get_graph)):
         """continue_application(...), then return case_view(...)."""
-        raise NotImplementedError
+        continue_application(graph, case_id, body.text)
+        return case_view(graph, case_id)
 
     @app.get("/cases/{case_id}", response_model=CaseView)
     def get_case(case_id: str = CaseId, graph=Depends(get_graph)):
         """case_view, or HTTPException(404) if the case doesn't exist."""
-        raise NotImplementedError
+        view = case_view(graph, case_id)
+        if view is None:
+            raise HTTPException(status_code=404, detail="Case not found")
+        return view
 
     @app.get("/cases/{case_id}/review")
     def get_review(case_id: str = CaseId, graph=Depends(get_graph)) -> dict:
         """The payload from awaiting_underwriter, or 404 if no review is pending."""
-        raise NotImplementedError
+        review = awaiting_underwriter(graph, case_id)
+        if review is None:
+            raise HTTPException(status_code=404, detail="No review pending")
+        return review
 
     @app.post("/cases/{case_id}/decision", response_model=CaseView)
     def decide(body: DecisionIn, case_id: str = CaseId, graph=Depends(get_graph)):
         """409 if no review is pending. Otherwise submit_decision(graph, case_id, body.model_dump())
         and return case_view."""
-        raise NotImplementedError
+        if awaiting_underwriter(graph, case_id) is None:
+            raise HTTPException(status_code=409, detail="No review pending")
+        submit_decision(graph, case_id, body.model_dump())
+        return case_view(graph, case_id)
 
     return app

@@ -13,8 +13,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 # 2. Then the code (changes often, so it comes last)
 COPY src ./src
+RUN uv sync --frozen --no-dev --no-editable
 
-ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app/src PYTHONUNBUFFERED=1
+ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
 
 # Don't run as root inside the container
 RUN useradd --create-home loanlens

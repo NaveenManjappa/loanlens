@@ -1,19 +1,22 @@
-# Deploying LoanLens to Azure Container Apps
+# Deploying LoanLens to Azure Container Apps (near-zero cost)
 
-A runbook for Lesson 12. It deploys the API with a Postgres checkpointer, so cases survive
-restarts, redeploys and multiple replicas.
+A runbook for Lesson 12. The API runs on **Azure Container Apps**. The image is built by
+**GitHub Actions** and stored on **GitHub Container Registry** (ghcr.io). The cases live in a free
+**Neon** Postgres database in London. Traces go to **LangSmith**.
 
 ```
- browser / curl ──HTTPS──> Azure Container Apps (loanlens-api, 0..2 replicas)
-                                 │                     │
-                                 ▼                     ▼
-                     Azure Database for         Azure OpenAI
-                     PostgreSQL (checkpoints)   (your Foundry deployment)
+ git push ──▶ GitHub Actions ──tests pass──▶ ghcr.io/naveenmanjappa/loanlens  (the IMAGE)
+                                                       │ pulled when a replica starts
+                                                       ▼
+                                      Azure Container Apps: FastAPI + LoanLens  (your HTTPS URL)
+                                         │             │              │            │
+                                         ▼             ▼              ▼            ▼
+                                   Neon Postgres   Azure OpenAI    LangSmith    Azure logs
+                                   (the CASES)     (the model)     (traces)     (console output)
 ```
 
 > **Demo only.** The API has no authentication yet. Anyone with the URL can read a case
-> and submit an underwriter decision. Use made-up applicants only, and delete everything when
-> you're done (step 7).
+> and submit an underwriter decision. Use made-up applicants only.
 
 ## 0. One-time setup (on your Mac)
 
@@ -23,74 +26,98 @@ az login
 az extension add --name containerapp --upgrade --allow-preview true
 az provider register --namespace Microsoft.App
 az provider register --namespace Microsoft.OperationalInsights
-az provider register --namespace Microsoft.DBforPostgreSQL
 ```
 
-## 1. Names and secrets for this shell
+## 1. The database: Neon (about 5 minutes, free)
+
+1. Sign up at [neon.com](https://neon.com) and create a project. Choose the region
+   **AWS Europe (London)**, `aws-eu-west-2`, so case data stays in the UK and close to `uksouth`.
+2. Copy the **direct** connection string (not the "pooled" one). It looks like
+   `postgresql://user:password@ep-xxxx.eu-west-2.aws.neon.tech/neondb?sslmode=require`.
+3. Optional check from your Mac. A case should survive a "restart":
+   ```bash
+   LOANLENS_PG_URL="<the connection string>" uv run pytest tests/test_lesson12_checkpointing.py -v
+   ```
+
+The free plan suspends the database after 5 minutes without traffic. The next query wakes it in
+about a second.
+
+## 2. The image: GitHub Actions publishes it to ghcr.io
+
+The workflow `.github/workflows/publish-image.yml` runs on every push to `main`:
+
+1. **test**: `uv sync --frozen`, then `uv run pytest`. Only fake models run, so no secrets are needed.
+2. **publish**: only if the tests pass, it builds the `Dockerfile` for `linux/amd64` and pushes
+   `ghcr.io/naveenmanjappa/loanlens:<commit sha>` and `:latest`.
+
+To use it:
+
+```bash
+git add -A && git commit -m "Lesson 12: API, Docker, deploy workflow" && git push
+```
+
+Then open the repo on GitHub → **Actions** and watch the run. When it's green, the image appears
+under your profile → **Packages** → `loanlens`.
+
+- **The package must be public**, so Azure can pull it without a password. A package published by a
+  workflow takes the repository's visibility, so a public repo gives you a public package. If it's
+  private: open the package → **Package settings** → **Change visibility** → Public.
+- A public image is safe only because it holds **no secrets**. That is the job of `.dockerignore`
+  (no `.env`, no `*.db`). Secrets go into Azure in step 4.
+- `uv.lock` must be committed: `--frozen` installs exactly what it lists.
+
+## 3. Names and secrets for this shell
 
 Run these from the `loanlens/` folder:
 
 ```bash
-set -a; source .env; set +a                 # loads your AZURE_OPENAI_* values
+set -a; source .env; set +a        # loads AZURE_OPENAI_* (and LANGSMITH_API_KEY if it's in .env)
 RG=rg-loanlens
 LOC=uksouth
 APP=loanlens-api
 ENV_NAME=loanlens-env
-PG=loanlens-pg-$RANDOM                      # must be globally unique
-PG_PASSWORD=$(openssl rand -base64 24 | tr -d '/+=')    # letters and digits only: safe in a URL
-echo "Postgres server: $PG"                 # note it down
+IMAGE=ghcr.io/naveenmanjappa/loanlens
+DATABASE_URL="<the Neon connection string>"
 ```
 
-## 2. Resource group and Postgres (about 5–10 minutes)
+## 4. Create the app (about 5 minutes)
 
 ```bash
 az group create --name $RG --location $LOC
+az containerapp env create --name $ENV_NAME --resource-group $RG --location $LOC
 
-az postgres flexible-server create \
-  --resource-group $RG --name $PG --location $LOC \
-  --tier Burstable --sku-name Standard_B1ms --storage-size 32 --version 16 \
-  --admin-user loanlens --admin-password "$PG_PASSWORD" \
-  --public-access 0.0.0.0
-
-DATABASE_URL="postgresql://loanlens:${PG_PASSWORD}@${PG}.postgres.database.azure.com:5432/postgres?sslmode=require"
-```
-
-- `--public-access 0.0.0.0` lets **Azure services** connect, and the password and TLS
-  (`sslmode=require`) protect the server. In production you'd use private networking instead.
-- Optional check before deploying: run
-  `LOANLENS_PG_URL="$DATABASE_URL" uv run pytest tests/test_lesson12_checkpointing.py -v`.
-  This test connects from your Mac, so it needs a firewall rule for your IP first:
-  `az postgres flexible-server firewall-rule create -g $RG -n $PG --rule-name me --start-ip-address <your IP> --end-ip-address <your IP>`.
-
-## 3. Build and deploy the app (about 5 minutes)
-
-```bash
-az containerapp up \
-  --name $APP --resource-group $RG --location $LOC \
-  --environment $ENV_NAME --source . --ingress external
-```
-
-This creates a container registry and a Container Apps environment, builds the `Dockerfile`, and
-deploys the image. **The first revision will fail to start, and that is expected**: the app needs
-its settings, which you add in the next step.
-
-## 4. Settings and secrets
-
-```bash
-az containerapp secret set --name $APP --resource-group $RG \
-  --secrets aoai-key="$AZURE_OPENAI_API_KEY" database-url="$DATABASE_URL"
-
-az containerapp update --name $APP --resource-group $RG \
+az containerapp create \
+  --name $APP --resource-group $RG --environment $ENV_NAME \
+  --image $IMAGE:$(git rev-parse HEAD) \
+  --ingress external --target-port 8000 \
   --min-replicas 0 --max-replicas 2 \
-  --set-env-vars \
+  --secrets aoai-key="$AZURE_OPENAI_API_KEY" database-url="$DATABASE_URL" \
+  --env-vars \
     AZURE_OPENAI_ENDPOINT="$AZURE_OPENAI_ENDPOINT" \
     AZURE_OPENAI_DEPLOYMENT_NAME="$AZURE_OPENAI_DEPLOYMENT_NAME" \
     AZURE_OPENAI_API_KEY=secretref:aoai-key \
     DATABASE_URL=secretref:database-url
 ```
 
-`secretref:` means the value is stored as a **secret** on the container app. It's injected at
-runtime and doesn't appear in plain text in the app's configuration or in the image.
+- `--image $IMAGE:$(git rev-parse HEAD)` deploys **exactly the commit you pushed**. Only use it after
+  that commit's workflow run is green.
+- `secretref:` means the value is stored as a **secret** on the container app and injected at
+  runtime. It's never in the image, and it doesn't appear in plain text in the app's configuration.
+
+**Optional: LangSmith tracing.** Add `LANGSMITH_API_KEY` to `.env` (see `.env.example`), run
+`set -a; source .env; set +a` again, then:
+
+```bash
+az containerapp secret set -n $APP -g $RG --secrets langsmith-key="$LANGSMITH_API_KEY"
+az containerapp update -n $APP -g $RG --set-env-vars \
+  LANGSMITH_TRACING=true LANGSMITH_API_KEY=secretref:langsmith-key \
+  LANGSMITH_PROJECT=loanlens LANGSMITH_HIDE_INPUTS=true
+```
+
+Use the same workspace variables as in Lesson 11. If your workspace is agent-based, replace
+`LANGSMITH_PROJECT` with `LANGSMITH_AGENT_ID` and `LANGSMITH_AGENT_ENVIRONMENT`. If your LangSmith
+account is in the EU region, also add `LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com`.
+`LANGSMITH_HIDE_INPUTS=true` keeps model inputs out of the traces (Lesson 7's leak path 4).
 
 ## 5. Try it
 
@@ -105,10 +132,11 @@ curl -X POST $URL/cases/demo-1/decision -H 'content-type: application/json' \
   -d '{"decision": "approve", "reason": "Two years of accounts seen", "underwriter_id": "uw-1"}'
 ```
 
-FastAPI also serves interactive docs at `$URL/docs`.
+FastAPI also serves interactive docs at `$URL/docs`. The first request after a quiet spell can take
+several seconds, because both the app and Neon are waking from zero.
 
 **The durability test:** restart the app, then read the case again. It's still there, because it
-lives in Postgres, not in the container:
+lives in Neon, not in the container:
 
 ```bash
 az containerapp revision restart -n $APP -g $RG \
@@ -116,38 +144,63 @@ az containerapp revision restart -n $APP -g $RG \
 curl $URL/cases/demo-1
 ```
 
-Logs: `az containerapp logs show -n $APP -g $RG --follow`
+## 6. Logs and traces
 
-## 6. Redeploy after a code change
+- **Azure: what the app prints** (requests, startup, errors):
+  - live in the terminal: `az containerapp logs show -n $APP -g $RG --follow`
+  - in the portal: the container app → **Monitoring** → *Log stream* (live) or *Logs* (searchable history)
+- **LangSmith: what happens inside the graph** (nodes, model calls, tokens, timings). Look in the
+  `loanlens` project.
+- **Neon: database activity and storage**, in the Neon console.
 
-Run the step 3 command again with the same names. The settings and secrets from step 4 are kept.
-
-## 7. Clean up (do this when you're done)
+## 7. Redeploy after a code change
 
 ```bash
-az group delete --name $RG --yes --no-wait
+git push                                   # wait for the workflow run to go green
+az containerapp update -n $APP -g $RG --image $IMAGE:$(git rev-parse HEAD)
 ```
 
-This deletes the Postgres server, the registry, the environment and the app.
+Settings and secrets are kept. Each update creates a new **revision**, so you can always see which
+commit is live.
 
-## Cost (approximate, check the Azure pricing pages)
+## 8. Clean up
 
-| Resource | Cost while it exists |
+```bash
+az group delete --name $RG --yes --no-wait   # the app, its environment and logs
+```
+
+The Neon project and the ghcr.io image are free to keep. Delete them in their own consoles if you
+want to.
+
+## Troubleshooting
+
+| Symptom | Likely cause and fix |
 |---|---|
-| Postgres Flexible Server, Burstable B1ms | about $14/month compute, plus storage. **The main cost** |
-| Container Registry (Basic) | a few dollars a month |
-| Container Apps (Consumption) | a free monthly grant (180,000 vCPU-seconds, 2M requests); with 0 minimum replicas, nothing is charged while idle |
-| Azure OpenAI | per token, as before |
+| The workflow stops at `test` | A test fails, or `uv.lock` wasn't committed after `uv add`. Run `uv run pytest` locally, then commit the lock file. |
+| `az containerapp create` can't pull the image | The package is private, or the workflow for that commit hasn't finished (step 2). |
+| `/health` never answers | The app crashes at startup. Run `az containerapp logs show -n $APP -g $RG --type system`, and the console logs without `--type`. `KeyError: 'AZURE_OPENAI_…'` means a setting is missing. |
+| 503 "temporarily unavailable" on messages | The model call failed: check the endpoint, deployment name and key settings. |
+| Errors connecting to the database | Use the *direct* Neon string (no `-pooler`), ending in `?sslmode=require`. |
 
-Scale-to-zero means the first request after a quiet spell is slow (a cold start of a few seconds).
+## Cost
+
+| Resource | Cost |
+|---|---|
+| Container Apps (Consumption, 0 minimum replicas) | free monthly grant (180,000 vCPU-seconds, 2M requests); nothing while idle |
+| Log Analytics (created with the environment) | a demo stays within the small free allowance |
+| ghcr.io (public image) and GitHub Actions (public repo) | free |
+| Neon Free plan | free: 100 compute-hours per project per month, 1 GB storage per project |
+| Azure OpenAI | per token, as before |
 
 ## Not production-ready yet (known gaps)
 
 - **No authentication.** Applicants need sessions, and the underwriter endpoints need Microsoft
   Entra ID, for example Container Apps' built-in authentication.
 - **No protection against concurrent messages on the same case.** Two requests at once can race.
-- **The API key is stored as a secret.** In production, use a managed identity to reach Azure OpenAI
-  with no key at all.
+- **The model key is stored as a secret.** In production, use a managed identity to reach Azure
+  OpenAI with no key at all.
+- **The case data sits with a second provider** (Neon). It's in London, but production would need a
+  data-processing agreement, or Azure-hosted Postgres with private networking.
+- **Deployment is manual.** Next steps would be a deploy job using GitHub's federated sign-in to
+  Azure (OIDC, no stored Azure password), and alerts on error rates and eval scores.
 - **No audit log or vulnerability detection** (see ADR 0002).
-- **Postgres is on public access.** In production, use private networking.
-- **No CI/CD and no monitoring alerts.**

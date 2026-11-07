@@ -15,7 +15,10 @@ YOUR JOB:  uv run pytest tests/test_lesson08_persistence.py -v  -> green
   + pipeline.build_graph(model=None, checkpointer=None) -> compile(checkpointer=checkpointer)
 """
 
-from langgraph.types import Overwrite  # noqa: F401
+from textwrap import wrap
+
+from langgraph.types import Overwrite
+import openai  # noqa: F401
 
 from loanlens.pii import redact_at_boundary# noqa: F401
 from langchain_core.messages import AIMessage, HumanMessage  # noqa: F401
@@ -55,7 +58,10 @@ def is_content_filter_error(exc: BaseException) -> bool:
                               (use getattr(exc, "code", None): most exceptions have no .code)
       - a blocked COMPLETION: an openai.ContentFilterFinishReasonError
     Anything else -> False. Never swallow an error you don't understand."""
-    raise NotImplementedError
+    return (
+        getattr(exc, "code", None) == "content_filter"
+        or isinstance(exc, openai.ContentFilterFinishReasonError)
+    )
 
 
 def withhold_blocked_message(graph, thread_id: str) -> None:
@@ -68,20 +74,51 @@ def withhold_blocked_message(graph, thread_id: str) -> None:
     Same id -> add_messages REPLACES the blocked message (the Lesson 7 trick).
     as_node="request_missing_info" records the update as if LoanLens had asked for information,
     so the case ends cleanly (.next == ()) and the next message starts a normal run."""
-    raise NotImplementedError
+    state = graph.get_state(thread_config(thread_id)).values
+    messages = state["messages"]
+    for m in reversed(messages):
+        if isinstance(m, HumanMessage):
+            blocked_id = m.id
+            break
+    else:
+        raise ValueError("No HumanMessage found in the case's messages")
+    graph.update_state(
+        thread_config(thread_id),
+        {
+            "messages": [
+                HumanMessage(WITHHELD, id=blocked_id),
+                AIMessage(BLOCKED_REPLY),
+            ],
+            "outcome": "awaiting_information",
+        },
+        as_node="request_missing_info",
+    )
 
 
 def continue_application(graph, thread_id: str, text: str) -> dict:
     """Send one applicant message into their case and return the final state.
     Redact at the BOUNDARY (Lesson 7) so raw PII never reaches a checkpoint:
         graph.invoke({"messages": [redact_at_boundary(text)]}, thread_config(thread_id))"""
+    # wrap the graph.invoke(...) in try/except Exception as exc:
+    #    content-filter error -> withhold_blocked_message(graph, thread_id), then return
+    #                            graph.get_state(thread_config(thread_id)).values
+    #    anything else        -> raise   (re-raise it unchanged)
     from loanlens.underwriting import awaiting_underwriter  # avoid circular import
     if awaiting_underwriter(graph, thread_id):
         from loanlens.underwriting import hold_for_underwriter  # avoid circular import
         hold_for_underwriter(graph, thread_id, text)
         return graph.get_state(thread_config(thread_id)).values
     
-    return graph.invoke({"messages":[redact_at_boundary(text)]},thread_config(thread_id))
+    try:
+        return graph.invoke(
+            {"messages": [redact_at_boundary(text)]},
+            thread_config(thread_id),
+        )
+    except Exception as exc:
+        if not is_content_filter_error(exc):
+            raise
+        withhold_blocked_message(graph, thread_id)
+        return graph.get_state(thread_config(thread_id)).values
 
 def current_outcome(graph, thread_id: str) -> str | None:
     """Read the case WITHOUT running anything: graph.get_state(config).values.get("outcome")."""
