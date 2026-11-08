@@ -8,8 +8,8 @@ LoanLens takes a loan application written in plain English, keeps personal data 
 extracts the details, screens them against policy, and either approves in principle, declines, asks for
 missing information, or refers the case to a **human underwriter**. Specialist AI agents prepare a risk
 and compliance report for the underwriter. The design follows one rule throughout: **the model only does
-what needs judgement; anything deterministic is plain code, and every consequential "no" or "maybe" goes
-to a person.**
+what needs judgement; anything deterministic is plain code; every "maybe" goes to a person; and the only
+automatic "no" is a hard legal rule (applicants must be 18 or over).**
 
 ```
 "Hi, I'm Priya, 34, a nurse on £42,000. I'd like £8,000 for a car."   → approved in principle
@@ -23,8 +23,8 @@ to a person.**
 
 ### The graph
 
-A **workflow with agents inside it**, not one free-roaming agent. The graph below is generated from the
-code (`build_graph`), then colour-coded:
+A **workflow with agents inside it**, not one free-roaming agent. The diagram below follows the graph that
+`build_graph()` compiles (`graph.get_graph().draw_mermaid()`), redrawn with labels and colours:
 
 ```mermaid
 flowchart TD
@@ -85,7 +85,7 @@ any replica can continue any case after a restart, a redeploy or a scale-to-zero
 | **Redact PII at the boundary, before anything is stored** | NI numbers, sort codes, account numbers and emails are replaced before the first checkpoint and before any model call (UK GDPR data minimisation). Agent tool results are redacted too, via `PIIMiddleware`. |
 | **Sanctions screening is plain code, run for every applicant** | It was first an agent tool that only ran on referrals, so a sanctioned applicant with no other flags was auto-approved. The eval suite caught it; it's now a fourth parallel check, and a match always goes to a human (name matches can be false positives). |
 | **Evaluator → guard** | The `age_not_invented` evaluator measures how often the model invents an age; the same rule runs inside the graph (`ground_age`), so an invented age is discarded and the applicant is asked instead. |
-| **Human review with `interrupt()`** | Referred cases pause at `underwriter_review` until a named underwriter submits a decision and a reason (UK GDPR Article 22: no solely automated adverse decisions). New applicant messages during review are held for the underwriter rather than restarting the case ([ADR 0001](docs/decisions/0001-underwriter-rescreen.md)). |
+| **Human review with `interrupt()`** | Referred cases pause at `underwriter_review` until a named underwriter submits a decision and a reason, so significant decisions get human review (the concern behind UK GDPR Article 22). New applicant messages during review are held for the underwriter rather than restarting the case ([ADR 0001](docs/decisions/0001-underwriter-rescreen.md)). |
 | **Specialists get private context** | Each specialist agent runs as a subgraph inside a node with only the redacted application, not the conversation; their reports merge into state through a custom reducer. |
 | **Content filtering by the provider, failures handled in code** | Azure's content filter blocks harmful prompts; LoanLens catches the block, withholds the message from the case and replies calmly, so a case never gets stuck ([ADR 0002](docs/decisions/0002-content-safety-provider-filter.md)). |
 | **One run per case at a time** | A per-case lock (a Postgres advisory lock across replicas) answers `409` to a concurrent request, preventing lost updates from double-clicks. |
@@ -102,14 +102,21 @@ rates and cost. Four evaluators (`src/loanlens/evals.py`):
 | `age_not_invented` | reference-free grounding check (also usable on live traffic) | 100% |
 | `extraction_correct` | reference-based (e.g. monthly salary → annual) | tracked rate |
 
-Results on a `gpt-5` deployment (8 cases × 2 repeats, November 2026):
+Results on a `gpt-5` deployment, 8 cases × 2 repeats on the current code (November 2026):
 
-| | Before the sanctions fix | After |
+| Evaluator | Pass rate | Notes |
 |---|---|---|
-| `outcome_matches` | 88%: the sanctioned applicant was **approved** in both runs | sanctioned applicant referred; one safe-direction miss (an extraction gap made LoanLens ask again) |
-| `no_raw_pii_sent_to_models` | 100% | 100% |
-| `age_not_invented` / `extraction_correct` | 100% / 100% | 100% / 100% |
-| Cost per case | ~550 tokens, 1 model call (clean) | 4–7.6k tokens, 5–7 calls (referred: specialists dominate) |
+| `outcome_matches` | 88% (14/16) | The sanctioned applicant is referred in both runs. Both misses are the `pii-heavy` case, where LoanLens asked for more information instead of approving: a safe-direction miss, under investigation. |
+| `no_raw_pii_sent_to_models` | 100% | |
+| `age_not_invented` | 100% | |
+| `extraction_correct` | 100% | |
+
+Cost per case: about 550–740 tokens and 1 model call for a clean application; 3.9k–7k tokens and 5–6 calls
+for a referred one, where the specialist agents dominate.
+
+**The bug this caught.** Before the sanctions fix, the sanctioned applicant was **approved** in both runs, after
+a single model call: only the extractor ever saw him. Sanctions screening lived inside the compliance agent, which
+only runs on referred cases. It is now a plain-code check that runs for every application.
 
 The unit-test suite (150+ tests) uses fake models only, so it's free, deterministic and runs in CI on every push.
 
@@ -165,6 +172,7 @@ This is a portfolio system, not a production lender. What's deliberately not don
 - **Authentication:** anyone with the URL can act as an underwriter. Next: Microsoft Entra ID for underwriters, sessions for applicants.
 - **Idempotency keys:** a concurrent request is rejected (`409`), but a retried request should get the first answer back.
 - **Vulnerable customers (Consumer Duty):** vulnerability markers are only checked on referred cases; the content filter is not a vulnerability detector.
+- **Automated declines:** under-18 applications are declined without a human. That's a legal-capacity rule, but production would still need Article 22 safeguards: telling the applicant, and offering human review on request.
 - **Audit log:** decisions live in checkpoints; production needs an append-only, access-controlled audit store.
 - **Keyless model access** (managed identity), private networking, a data-processing agreement for the database provider, and alerts on error rates and eval scores.
 

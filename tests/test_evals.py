@@ -27,6 +27,20 @@ def test_dataset_loads():
     assert "sanctioned-person" in ids and len(ids) == len(set(ids))
 
 
+def test_dataset_has_a_job_title_only_case():
+    case = next(c for c in load_dataset() if c["id"] == "job-title-only")
+    assert case["expect_outcome"] == "awaiting_information"
+    assert case["expect_employment_status"] is None
+
+
+def test_other_cases_state_employment():
+    """One case, one thing tested: only job-title-only leaves the employment status unstated."""
+    words = ("employed", "self-employed", "freelance", "retired", "unemployed", "student")
+    for case in load_dataset():
+        if case["id"] != "job-title-only":
+            assert any(w in case["text"].lower() for w in words), f"{case['id']} doesn't state employment"
+
+
 def test_outcome_matches():
     assert outcome_matches({"expect_outcome": "declined"}, run("declined")) is True
     assert outcome_matches({"expect_outcome": "declined"}, run("referred")) is False

@@ -84,6 +84,49 @@ def test_graph_end_to_end_with_fake_model(fake_structured_model):
 # ── LIVE: the real model (skipped unless LOANLENS_LIVE=1) ─────────────────
 
 
+# ── Employment status policy ───────────────────────────────────────────────
+# employment_status is set only when the applicant states it or uses words that clearly imply it
+# ("employed", "salary", "work for/at", "self-employed", "freelance", "contractor", "retired",
+# "unemployed", "student"). A job title alone ("nurse", "plumber") is NOT an employment status:
+# it stays null and LoanLens asks. Without this rule the model inferred "employed" in some runs
+# and not in others, so the same facts got different outcomes.
+
+
+def test_prompt_states_the_employment_status_policy():
+    prompt = EXTRACTION_PROMPT.lower()
+    assert "employment_status" in prompt
+    assert "job title" in prompt, "say explicitly that a job title alone is not an employment status"
+
+
+JOB_TITLE_ONLY = [
+    "Chris Taylor, 41, plumber, about £38,000 a year, looking for £5,000.",
+    "Jordan Lee, 31, teacher, £31,000 a year, would like £3,000.",
+    "Priya Shah, 34, nurse, £42,000 a year, want £8,000.",
+]
+
+
+@pytest.mark.live
+@pytest.mark.parametrize("text", JOB_TITLE_ONLY)
+def test_live_job_title_alone_is_not_an_employment_status(text):
+    for _ in range(3):  # consistency is the point: the same facts must get the same answer
+        app = build_graph().invoke({"messages": [HumanMessage(text)]})["application"]
+        assert app["employment_status"] is None, f"inferred {app['employment_status']!r} from a job title"
+
+
+@pytest.mark.live
+@pytest.mark.parametrize(
+    "text, status",
+    [
+        ("Priya Shah, 34, employed as a nurse, £42,000 a year, want £8,000.", "employed"),
+        ("Sam Jones, 29, freelance web designer, about £40k a year, want £5,000.", "self_employed"),
+        ("Ann Ward, 67, retired teacher, pension of £24,000 a year, want £4,000.", "retired"),
+    ],
+)
+def test_live_stated_employment_is_extracted(text, status):
+    app = build_graph().invoke({"messages": [HumanMessage(text)]})["application"]
+    assert app["employment_status"] == status
+
+
 @pytest.mark.live
 def test_live_converts_monthly_income_to_annual():
     app = build_graph().invoke({"messages": [EMAIL]})["application"]
