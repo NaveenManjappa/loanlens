@@ -92,7 +92,7 @@ any replica can continue any case after a restart, a redeploy or a scale-to-zero
 
 ## Evaluation
 
-`scripts/run_evals.py` runs 8 labelled cases through the **real** model several times and reports pass
+`scripts/run_evals.py` runs 9 labelled cases through the **real** model several times and reports pass
 rates and cost. Four evaluators (`src/loanlens/evals.py`):
 
 | Evaluator | Type | Bar |
@@ -102,21 +102,26 @@ rates and cost. Four evaluators (`src/loanlens/evals.py`):
 | `age_not_invented` | reference-free grounding check (also usable on live traffic) | 100% |
 | `extraction_correct` | reference-based (e.g. monthly salary → annual) | tracked rate |
 
-Results on a `gpt-5` deployment, 8 cases × 2 repeats on the current code (November 2026):
+Results on a `gpt-5` deployment, 9 cases × 2 repeats on the current code (November 2026):
 
-| Evaluator | Pass rate | Notes |
-|---|---|---|
-| `outcome_matches` | 88% (14/16) | The sanctioned applicant is referred in both runs. Both misses are the `pii-heavy` case, where LoanLens asked for more information instead of approving: a safe-direction miss, under investigation. |
-| `no_raw_pii_sent_to_models` | 100% | |
-| `age_not_invented` | 100% | |
-| `extraction_correct` | 100% | |
+| Evaluator | Pass rate |
+|---|---|
+| `outcome_matches` | 100% (18/18), including the sanctioned applicant referred in both runs |
+| `no_raw_pii_sent_to_models` | 100% |
+| `age_not_invented` | 100% |
+| `extraction_correct` | 100% |
 
-Cost per case: about 550–740 tokens and 1 model call for a clean application; 3.9k–7k tokens and 5–6 calls
-for a referred one, where the specialist agents dominate.
+Cost per case: about 620–910 tokens and 1 model call for an application that doesn't need review;
+3.9k–6.2k tokens and 5–6 calls for a referred one, where the specialist agents dominate.
 
 **The bug this caught.** Before the sanctions fix, the sanctioned applicant was **approved** in both runs, after
 a single model call: only the extractor ever saw him. Sanctions screening lived inside the compliance agent, which
 only runs on referred cases. It is now a plain-code check that runs for every application.
+
+**And one it's tracking.** An earlier run showed an inconsistency: given only a job title ("nurse"), the model
+sometimes inferred "employed" and sometimes didn't. That's now an explicit policy in the extraction prompt: the
+employment status is set only when stated or clearly implied, otherwise LoanLens asks. The `job-title-only`
+case tests it.
 
 The unit-test suite (150+ tests) uses fake models only, so it's free, deterministic and runs in CI on every push.
 
@@ -173,6 +178,9 @@ This is a portfolio system, not a production lender. What's deliberately not don
 - **Idempotency keys:** a concurrent request is rejected (`409`), but a retried request should get the first answer back.
 - **Vulnerable customers (Consumer Duty):** vulnerability markers are only checked on referred cases; the content filter is not a vulnerability detector.
 - **Automated declines:** under-18 applications are declined without a human. That's a legal-capacity rule, but production would still need Article 22 safeguards: telling the applicant, and offering human review on request.
+- **Employment status from a job title:** the policy above is a prompt rule, and a stricter live test
+  (`tests/test_extraction.py`) shows the model still occasionally infers "employed" from "teacher". A code
+  guard, like the one for invented ages, would make it watertight.
 - **Audit log:** decisions live in checkpoints; production needs an append-only, access-controlled audit store.
 - **Keyless model access** (managed identity), private networking, a data-processing agreement for the database provider, and alerts on error rates and eval scores.
 
