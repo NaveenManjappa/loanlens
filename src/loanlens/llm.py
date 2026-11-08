@@ -1,11 +1,7 @@
-"""The one place LoanLens creates its chat model.
+"""The one place LoanLens creates its chat model, so switching provider is a change in this file only.
 
-Every LangGraph node gets its model from `get_model()`, so switching provider
-(Foundry -> OpenAI -> anything OpenAI-compatible) is a change in this file only.
-
-Uses the Azure OpenAI **v1 API** exposed by a Microsoft Foundry resource:
-plain `ChatOpenAI` pointed at `https://<resource>.openai.azure.com/openai/v1/`.
-No api_version needed on v1.
+Uses the Azure OpenAI v1 API exposed by a Microsoft Foundry resource: plain ChatOpenAI pointed at
+https://<resource>.openai.azure.com/openai/v1/ (no api_version needed on v1).
 Docs: https://docs.langchain.com/oss/python/integrations/providers/microsoft#azure-openai
 """
 
@@ -26,9 +22,14 @@ def v1_base_url(endpoint: str) -> str:
 
 
 def get_model(**kwargs) -> ChatOpenAI:
+    """The configured chat model. kwargs are passed to ChatOpenAI (e.g. temperature)."""
     load_dotenv()
+    missing = [name for name in REQUIRED_ENV if not os.getenv(name)]
+    if missing:
+        raise RuntimeError(f"Missing environment variables: {', '.join(missing)} (see .env.example)")
+
     return ChatOpenAI(
-        model=os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"],  # on Azure, 'model' = YOUR deployment name
+        model=os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"],  # on Azure, 'model' is YOUR deployment name
         base_url=v1_base_url(os.environ["AZURE_OPENAI_ENDPOINT"]),
         api_key=os.environ["AZURE_OPENAI_API_KEY"],
         **kwargs,

@@ -21,7 +21,11 @@ PRIYA = ApplicationDetails(
 )
 PRIYA_TEXT = "Priya Shah, 34, employed nurse, £42,000 a year, want £8,000"
 SAM = ApplicationDetails(
-    applicant_name="Sam Jones", age=29, annual_income=40_000, loan_amount=5_000, employment_status="self_employed"
+    applicant_name="Sam Jones",
+    age=29,
+    annual_income=40_000,
+    loan_amount=5_000,
+    employment_status="self_employed",
 )
 SAM_TEXT = "Sam Jones, 29, self-employed, about £40,000 a year, want £5,000"
 
@@ -77,6 +81,15 @@ def test_blocked_text_is_withheld_from_the_case():
     contents = [m.content for m in final["messages"]]
     assert WITHHELD in contents
     assert not any("BADWORD" in c for c in contents), "the blocked text must not stay in the checkpoint"
+
+
+def test_logs_never_contain_the_applicants_text(caplog):
+    caplog.set_level("DEBUG", logger="loanlens")
+    graph = graph_with(PRIYA)
+    continue_application(graph, "case-1", "you BADWORD")
+    continue_application(graph, "case-1", PRIYA_TEXT)
+    assert "content filter" in caplog.text and "approved_in_principle" in caplog.text
+    assert "BADWORD" not in caplog.text and "Priya" not in caplog.text
 
 
 def test_case_continues_after_a_blocked_message():
@@ -166,12 +179,24 @@ def test_review_and_decision_need_a_pending_review():
 def test_decision_must_be_complete():
     client = client_for(graph_with(SAM))
     client.post("/cases/sam/messages", json={"text": SAM_TEXT})
-    assert client.post("/cases/sam/decision", json={"decision": "approve", "reason": "", "underwriter_id": "uw"}).status_code == 422
-    assert client.post("/cases/sam/decision", json={"decision": "maybe", "reason": "x", "underwriter_id": "uw"}).status_code == 422
+    assert (
+        client.post(
+            "/cases/sam/decision", json={"decision": "approve", "reason": "", "underwriter_id": "uw"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/cases/sam/decision", json={"decision": "maybe", "reason": "x", "underwriter_id": "uw"}
+        ).status_code
+        == 422
+    )
 
 
 def test_model_outage_is_503_and_leaks_nothing():
     outage = openai.APIConnectionError(message="connection refused for NI AB123456C", request=None)
-    response = client_for(graph_with(fail_with=outage)).post("/cases/case-1/messages", json={"text": PRIYA_TEXT})
+    response = client_for(graph_with(fail_with=outage)).post(
+        "/cases/case-1/messages", json={"text": PRIYA_TEXT}
+    )
     assert response.status_code == 503
     assert response.json() == {"detail": UNAVAILABLE}, "never send internal error text to the customer"

@@ -6,26 +6,29 @@
     POST /cases/{case_id}/decision   the underwriter decides        -> CaseView, 409 if none pending
     GET  /health                     health probe                   -> {"status": "ok"}
 
-A thin layer: routes call cases.py and underwriting.py and hold no business logic. Pydantic models
-validate input, so a bad request gets a 422 before any graph runs. The compiled graph is injected
-through create_app(graph): tests pass a graph built on fake models, main.py passes the real one.
-Changes to a case run under a per-case lock (locks.py), so a concurrent request gets a 409.
+A thin layer: routes call cases.py and hold no business logic. Pydantic models validate input, so a
+bad request gets a 422 before any graph runs. The compiled graph is passed to create_app(graph):
+tests pass a graph built on fake models; main.py sets the real one at startup. Changes to a case run
+under a per-case lock (locks.py), so a concurrent request gets a 409.
 """
 
-from typing import Literal
+import logging
+from typing import Any, Literal
 
 import openai
 from fastapi import Depends, FastAPI, HTTPException, Path, Request
 from fastapi.responses import JSONResponse
 from langchain_core.messages import AIMessage
+from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
 
-from loanlens.cases import continue_application, thread_config
-from loanlens.locks import CaseBusy, InProcessCaseLocks
-from loanlens.underwriting import awaiting_underwriter, submit_decision
+from loanlens.cases import awaiting_underwriter, continue_application, submit_decision, thread_config
+from loanlens.locks import CaseBusy, CaseLocks, InProcessCaseLocks
 
-# case ids become LangGraph thread ids: allow only safe characters, and never use PII
-# (an email or NI number) as a case id: ids appear in URLs and access logs.
+logger = logging.getLogger(__name__)
+
+# Case ids become LangGraph thread ids, so only safe characters are allowed. Never use PII (an
+# email or NI number) as a case id: ids appear in URLs and access logs.
 CaseId = Path(pattern=r"^[A-Za-z0-9_-]{1,64}$")
 UNAVAILABLE = "LoanLens is temporarily unavailable. Please try again shortly."
 BUSY = "This case is already being processed. Please wait a moment and try again."
@@ -50,73 +53,77 @@ class CaseView(BaseModel):
     awaiting_underwriter: bool
 
 
-def get_graph(request: Request):
+# ── Dependencies: FastAPI calls these to give each route the graph and the locks ──
+
+
+def get_graph(request: Request) -> CompiledStateGraph:
     return request.app.state.graph
 
 
-def get_locks(request: Request):
+def get_locks(request: Request) -> CaseLocks:
     return request.app.state.locks
 
 
-def case_view(graph, case_id: str) -> dict | None:
-    """Return the CaseView fields for a case, or None if the case doesn't exist."""
-    state = graph.get_state(thread_config(case_id))
-    values = state.values
+def case_view(graph: CompiledStateGraph, case_id: str) -> dict[str, Any] | None:
+    """The CaseView fields for a case, or None if the case doesn't exist."""
+    values = graph.get_state(thread_config(case_id)).values
     if not values:
         return None
 
-    reply = None
-    for message in values.get("messages", []):
-        if isinstance(message, AIMessage):
-            reply = message.content
-
+    replies = [m.content for m in values.get("messages", []) if isinstance(m, AIMessage)]
     return {
         "case_id": case_id,
         "outcome": values.get("outcome"),
-        "reply": reply,
+        "reply": replies[-1] if replies else None,
         "awaiting_underwriter": awaiting_underwriter(graph, case_id) is not None,
     }
 
 
-def create_app(graph=None, lifespan=None, locks=None) -> FastAPI:
+def create_app(
+    graph: CompiledStateGraph | None = None,
+    lifespan=None,
+    locks: CaseLocks | None = None,
+) -> FastAPI:
+    """Build the FastAPI app. Without a graph, the lifespan must set app.state.graph at startup."""
     app = FastAPI(title="LoanLens", lifespan=lifespan)
-    app.state.locks = locks or InProcessCaseLocks()  # main.py swaps in Postgres locks at startup
+    app.state.locks = locks or InProcessCaseLocks()
     if graph is not None:
         app.state.graph = graph
 
     @app.exception_handler(CaseBusy)
-    def case_busy(request: Request, exc: CaseBusy):
+    def case_busy(request: Request, exc: CaseBusy) -> JSONResponse:
         """Another request is changing this case: 409 with a fixed message."""
-        return JSONResponse(
-            status_code=409,
-            content={"detail": BUSY},
-        )
+        logger.info("case busy, rejected %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=409, content={"detail": BUSY})
 
     @app.exception_handler(openai.APIError)
-    def model_unavailable(request: Request, exc: openai.APIError):
+    def model_unavailable(request: Request, exc: openai.APIError) -> JSONResponse:
         """The model is down, rate-limited or unreachable: 503 with a fixed message.
 
-        Never echo str(exc): provider error text can contain parts of the prompt, i.e. customer data.
+        Never log or return str(exc): provider error text can contain parts of the prompt, i.e.
+        customer data. Only the exception type is logged.
         """
-        return JSONResponse(
-            status_code=503,
-            content={"detail": UNAVAILABLE},
-        )
+        logger.error("model call failed (%s) on %s %s", type(exc).__name__, request.method, request.url.path)
+        return JSONResponse(status_code=503, content={"detail": UNAVAILABLE})
 
     @app.get("/health")
     def health() -> dict:
-        """Health probe."""
         return {"status": "ok"}
 
     @app.post("/cases/{case_id}/messages", response_model=CaseView)
-    def send_message(body: MessageIn, case_id: str = CaseId, graph=Depends(get_graph),locks=Depends(get_locks)):
+    def send_message(
+        body: MessageIn,
+        case_id: str = CaseId,
+        graph: CompiledStateGraph = Depends(get_graph),
+        locks: CaseLocks = Depends(get_locks),
+    ) -> dict:
         """Send an applicant message into the case and return the updated view."""
         with locks.hold(case_id):
             continue_application(graph, case_id, body.text)
             return case_view(graph, case_id)
 
     @app.get("/cases/{case_id}", response_model=CaseView)
-    def get_case(case_id: str = CaseId, graph=Depends(get_graph)):
+    def get_case(case_id: str = CaseId, graph: CompiledStateGraph = Depends(get_graph)) -> dict:
         """Read a case without running anything."""
         view = case_view(graph, case_id)
         if view is None:
@@ -124,7 +131,11 @@ def create_app(graph=None, lifespan=None, locks=None) -> FastAPI:
         return view
 
     @app.get("/cases/{case_id}/review")
-    def get_review(case_id: str = CaseId, graph=Depends(get_graph),locks=Depends(get_locks)) -> dict:
+    def get_review(
+        case_id: str = CaseId,
+        graph: CompiledStateGraph = Depends(get_graph),
+        locks: CaseLocks = Depends(get_locks),
+    ) -> dict:
         """The review payload for a case paused at underwriter_review."""
         with locks.hold(case_id):
             review = awaiting_underwriter(graph, case_id)
@@ -133,7 +144,12 @@ def create_app(graph=None, lifespan=None, locks=None) -> FastAPI:
         return review
 
     @app.post("/cases/{case_id}/decision", response_model=CaseView)
-    def decide(body: DecisionIn, case_id: str = CaseId, graph=Depends(get_graph),locks=Depends(get_locks)):
+    def decide(
+        body: DecisionIn,
+        case_id: str = CaseId,
+        graph: CompiledStateGraph = Depends(get_graph),
+        locks: CaseLocks = Depends(get_locks),
+    ) -> dict:
         """Resume a paused case with the underwriter's decision.
 
         The pending-review check runs inside the lock: checking first and acting later would be a race.

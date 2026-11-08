@@ -1,93 +1,62 @@
-"""Screening: policy checks that run in parallel, then combine.
+"""Validation and policy screening. Plain code: deterministic and auditable.
 
-Every check writes to risk_flags in the same super-step, so risk_flags has an append reducer.
-check_sanctions runs for every complete application, and a match is a flag, so it always reaches a
-human. build_graph compiles the checks as a standalone graph for tests.
+    validate_application -> incomplete: ask the applicant
+                         -> complete:   check_affordability | check_age | check_employment | check_sanctions
+                                        (in parallel) -> combine
+
+Each check appends its flags to risk_flags. Sanctions screening runs for every complete application,
+and a match is a flag, so it always reaches a human.
 """
 
-from typing import Annotated
-from operator import add
-
-from langchain_core.messages import AIMessage
-from langgraph.graph import END, START, MessagesState, StateGraph
-
 from loanlens.compliance import is_sanctioned
+from loanlens.state import PipelineState
 
-# LoanLens policy (illustrative): every rule traces back to here
+# LoanLens policy (illustrative): every rule traces back to here.
+REQUIRED_FIELDS = ["applicant_name", "age", "annual_income", "loan_amount", "employment_status"]
 MIN_AGE = 18
-MAX_LOAN_TO_INCOME = 0.5  # flag if loan is MORE than 50% of annual income
+MAX_LOAN_TO_INCOME = 0.5  # flag a loan of MORE than 50% of annual income
 
 
-class ScreeningState(MessagesState, total=False):
-    # `messages` is inherited from MessagesState: list of messages, reducer = add_messages
-    application: dict
-    risk_flags: Annotated[
-        list[str], add
-    ]  # parallel checks append here
-    decision_hint: str  # "clear" | "refer"
+def validate_application(state: PipelineState) -> dict:
+    """List the required fields that are absent or None, in REQUIRED_FIELDS order."""
+    application = state["application"]
+    missing = [field for field in REQUIRED_FIELDS if application.get(field) is None]
+    return {"missing_fields": missing, "is_complete": not missing}
 
 
-def check_affordability(state: ScreeningState) -> dict:
-    """Flag high_loan_to_income if the loan is more than MAX_LOAN_TO_INCOME of annual income."""
+def check_affordability(state: PipelineState) -> dict:
+    """Flag high_loan_to_income if the loan is over MAX_LOAN_TO_INCOME of income (or income is not positive)."""
     loan_amount = state["application"]["loan_amount"]
     annual_income = state["application"]["annual_income"]
-    risk_flags = []
-    if loan_amount / annual_income > MAX_LOAN_TO_INCOME:
-        risk_flags.append("high_loan_to_income")
-    return {"risk_flags": risk_flags}
+    if annual_income <= 0 or loan_amount / annual_income > MAX_LOAN_TO_INCOME:
+        return {"risk_flags": ["high_loan_to_income"]}
+    return {"risk_flags": []}
 
 
-def check_age(state: ScreeningState) -> dict:
+def check_age(state: PipelineState) -> dict:
     """Flag under_18 if the applicant is younger than MIN_AGE."""
-    age = state["application"]["age"]
-    if not age:
-        return {"risk_flags": []}
-    return {"risk_flags": ["under_18"] if age < MIN_AGE else []}
+    if state["application"]["age"] < MIN_AGE:
+        return {"risk_flags": ["under_18"]}
+    return {"risk_flags": []}
 
 
-def check_employment(state: ScreeningState) -> dict:
-    """Flag unemployed and self-employed applicants."""
-    employment_status = state["application"].get("employment_status")
-    risk_flags = []
+def check_employment(state: PipelineState) -> dict:
+    """Flag unemployed and self-employed applicants for review."""
+    employment_status = state["application"]["employment_status"]
     if employment_status == "unemployed":
-        risk_flags.append("no_employment_income")
-    elif employment_status == "self_employed":
-        risk_flags.append("self_employed_needs_review")
-    return {"risk_flags": risk_flags}
+        return {"risk_flags": ["no_employment_income"]}
+    if employment_status == "self_employed":
+        return {"risk_flags": ["self_employed_needs_review"]}
+    return {"risk_flags": []}
 
 
-def combine(state: ScreeningState) -> dict:
-    """Turn the flags into a decision hint and one summary message."""
-    risk_flags = state["risk_flags"]
-    decision_hint = "refer" if risk_flags else "clear"
+def check_sanctions(state: PipelineState) -> dict:
+    """Flag sanctions_match if the applicant's name is on the sanctions list."""
+    if is_sanctioned(state["application"]["applicant_name"]):
+        return {"risk_flags": ["sanctions_match"]}
+    return {"risk_flags": []}
 
-    return {
-        "decision_hint": decision_hint,
-        "messages": [
-            AIMessage(
-                f"Screening: {decision_hint}. Flags: {', '.join(sorted(risk_flags)) if risk_flags else 'none'}"
-            )
-        ],
-    }
-def check_sanctions(state: ScreeningState) -> dict:
-    applicant_name = state["application"]["applicant_name"]
-    return {"risk_flags": ["sanctions_match"] if is_sanctioned(applicant_name) else []}
 
-def build_graph():
-    """Standalone screening graph: every check in parallel, then combine."""
-    builder = StateGraph(ScreeningState)
-    builder.add_node(check_affordability)
-    builder.add_node(check_age)
-    builder.add_node(check_employment)
-    builder.add_node(check_sanctions)
-    builder.add_node(combine)
-    builder.add_edge(START, "check_affordability")
-    builder.add_edge(START, "check_age")
-    builder.add_edge(START, "check_employment")
-    builder.add_edge(START, "check_sanctions")
-    builder.add_edge("check_sanctions", "combine")
-    builder.add_edge("check_affordability", "combine")
-    builder.add_edge("check_age", "combine")
-    builder.add_edge("check_employment", "combine")
-    builder.add_edge("combine", END)
-    return builder.compile()
+def combine(state: PipelineState) -> dict:
+    """Join point: runs once every check has finished, so routing sees all the flags."""
+    return {}

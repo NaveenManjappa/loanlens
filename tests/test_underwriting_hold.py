@@ -1,14 +1,18 @@
 """Messages that arrive while a review is pending are held for the underwriter, not run (ADR 0001)."""
 
+from helpers import current_outcome, decisions_made
 from langgraph.checkpoint.memory import InMemorySaver
 
-from loanlens.cases import continue_application, current_outcome, decisions_made
+from loanlens.cases import awaiting_underwriter, continue_application, submit_decision
 from loanlens.extraction import ApplicationDetails
 from loanlens.pipeline import build_graph
-from loanlens.underwriting import awaiting_underwriter, submit_decision
 
 SAM = ApplicationDetails(
-    applicant_name="Sam Jones", age=29, annual_income=40_000, loan_amount=5_000, employment_status="self_employed"
+    applicant_name="Sam Jones",
+    age=29,
+    annual_income=40_000,
+    loan_amount=5_000,
+    employment_status="self_employed",
 )
 SAM_EMPLOYED = SAM.model_copy(update={"employment_status": "employed"})
 APPROVE = {"decision": "approve", "reason": "Job offer letter verified", "underwriter_id": "uw-017"}

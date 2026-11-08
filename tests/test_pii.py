@@ -5,6 +5,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from loanlens.extraction import ApplicationDetails
 from loanlens.pii import find_pii, pii_middleware, redact, redact_at_boundary, redact_pii
+from loanlens.pipeline import build_graph
+from loanlens.risk import build_risk_agent
+from loanlens.specialists import make_request
 
 NINO = "AB 12 34 56 C"
 EMAIL_WITH_PII = (
@@ -56,7 +59,12 @@ def test_redact_replaces_every_type_and_keeps_what_the_model_needs():
     out = redact(EMAIL_WITH_PII)
     for leaked in (NINO, "20-45-77", "41234567", "priya.shah@example.co.uk"):
         assert leaked not in out
-    for tag in ("[REDACTED_UK_NINO]", "[REDACTED_UK_SORT_CODE]", "[REDACTED_UK_ACCOUNT_NUMBER]", "[REDACTED_EMAIL]"):
+    for tag in (
+        "[REDACTED_UK_NINO]",
+        "[REDACTED_UK_SORT_CODE]",
+        "[REDACTED_UK_ACCOUNT_NUMBER]",
+        "[REDACTED_EMAIL]",
+    ):
         assert tag in out
     for needed in ("Priya Shah", "34", "£42,000", "£8,000"):
         assert needed in out, "data minimisation, not data destruction"
@@ -85,15 +93,17 @@ def test_node_returns_nothing_to_replace_when_clean():
     assert redact_pii({"messages": [HumanMessage("Tom, 41, £60k", id="m")]}) == {"messages": []}
 
 
-# ── Wired into the pipeline (edit pipeline.py) ─────────────────────────────
+# ── Wired into the pipeline ────────────────────────────────────────────────
 
 
 def test_pipeline_redacts_before_the_llm_sees_anything(fake_structured_model):
-    from loanlens.pipeline import build_graph
-
     fake = fake_structured_model(
         ApplicationDetails(
-            applicant_name="Priya Shah", age=34, annual_income=42_000, loan_amount=8_000, employment_status="employed"
+            applicant_name="Priya Shah",
+            age=34,
+            annual_income=42_000,
+            loan_amount=8_000,
+            employment_status="employed",
         )
     )
     graph = build_graph(fake)
@@ -105,7 +115,7 @@ def test_pipeline_redacts_before_the_llm_sees_anything(fake_structured_model):
     assert final["outcome"] == "approved_in_principle"
 
 
-# ── Wired into the create_agent investigator (edit investigator_v2.py) ─────
+# ── Wired into the agents ──────────────────────────────────────────────────
 
 
 def test_pii_middleware_has_one_redactor_per_type():
@@ -113,15 +123,13 @@ def test_pii_middleware_has_one_redactor_per_type():
     assert len(mws) == 4
 
 
-def test_investigator_never_sees_bank_details_from_the_bureau(scripted_model):
-    from loanlens.investigator_v2 import build_agent, make_request
-
+def test_risk_agent_never_sees_bank_details_from_the_bureau(scripted_model):
     lookup = AIMessage(
         content="",
         tool_calls=[{"name": "lookup_credit_file", "args": {"applicant_name": "Sam Jones"}, "id": "call_0"}],
     )
     model = scripted_model([lookup, AIMessage("REFER TO SENIOR UNDERWRITER\n- x")])
-    build_agent(model).invoke({"messages": [make_request({"applicant_name": "Sam Jones"})]})
+    build_risk_agent(model).invoke({"messages": [make_request({"applicant_name": "Sam Jones"})]})
     tool_result_seen = model.calls[1][-1].content
     assert "missed_payments_12m" in tool_result_seen, "the useful data still arrives"
     assert "20-45-77" not in tool_result_seen and "41234567" not in tool_result_seen

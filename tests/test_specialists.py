@@ -3,16 +3,20 @@
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from loanlens.cases import continue_application, thread_config
+from loanlens.cases import awaiting_underwriter, continue_application, submit_decision, thread_config
 from loanlens.compliance import build_compliance_agent
 from loanlens.extraction import ApplicationDetails
-from loanlens.investigator_v2 import apply_policy, build_agent
 from loanlens.pipeline import build_graph
-from loanlens.specialists import first_line, make_specialist_node, merge_reports
-from loanlens.underwriting import awaiting_underwriter, submit_decision
+from loanlens.risk import build_risk_agent, risk_verdict
+from loanlens.specialists import first_line, make_specialist_node
+from loanlens.state import merge_reports
 
 SAM = ApplicationDetails(
-    applicant_name="Sam Jones", age=29, annual_income=40_000, loan_amount=5_000, employment_status="self_employed"
+    applicant_name="Sam Jones",
+    age=29,
+    annual_income=40_000,
+    loan_amount=5_000,
+    employment_status="self_employed",
 )
 PRIYA = ApplicationDetails(
     applicant_name="Priya Shah", age=34, annual_income=42_000, loan_amount=8_000, employment_status="employed"
@@ -40,10 +44,14 @@ def compliance_script():
 
 def specialists(scripted_model):
     risk_model, comp_model = scripted_model(risk_script()), scripted_model(compliance_script())
-    return {
-        "risk": (build_agent(risk_model, retry_initial_delay=0), apply_policy),
-        "compliance": (build_compliance_agent(comp_model), first_line),
-    }, risk_model, comp_model
+    return (
+        {
+            "risk": (build_risk_agent(risk_model, retry_initial_delay=0), risk_verdict),
+            "compliance": (build_compliance_agent(comp_model), first_line),
+        },
+        risk_model,
+        comp_model,
+    )
 
 
 # ── merge_reports ──────────────────────────────────────────────────────────
@@ -82,7 +90,9 @@ def test_specialist_gets_a_private_conversation(scripted_model):
 # ── In the pipeline ────────────────────────────────────────────────────────
 
 
-def test_referred_case_runs_both_specialists_in_parallel_then_pauses(scripted_model, scripted_structured_model):
+def test_referred_case_runs_both_specialists_in_parallel_then_pauses(
+    scripted_model, scripted_structured_model
+):
     specs, risk_model, comp_model = specialists(scripted_model)
     graph = build_graph(scripted_structured_model([SAM]), checkpointer=InMemorySaver(), specialists=specs)
     edges = {(e.source, e.target) for e in graph.get_graph().edges}
@@ -124,7 +134,9 @@ def test_clean_cases_never_call_the_specialists(scripted_model, scripted_structu
 
 def test_reports_are_reset_on_the_next_run(scripted_model, scripted_structured_model):
     specs, _, _ = specialists(scripted_model)
-    graph = build_graph(scripted_structured_model([SAM, PRIYA]), checkpointer=InMemorySaver(), specialists=specs)
+    graph = build_graph(
+        scripted_structured_model([SAM, PRIYA]), checkpointer=InMemorySaver(), specialists=specs
+    )
     continue_application(graph, "case-x", "first application")
     submit_decision(graph, "case-x", APPROVE)
     continue_application(graph, "case-x", "a new, clean application")

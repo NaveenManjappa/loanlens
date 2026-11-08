@@ -21,7 +21,11 @@ PRIYA = ApplicationDetails(
 )
 PRIYA_TEXT = "Priya Shah, 34, employed nurse, £42,000 a year, want £8,000"
 SAM = ApplicationDetails(
-    applicant_name="Sam Jones", age=29, annual_income=40_000, loan_amount=5_000, employment_status="self_employed"
+    applicant_name="Sam Jones",
+    age=29,
+    annual_income=40_000,
+    loan_amount=5_000,
+    employment_status="self_employed",
 )
 
 

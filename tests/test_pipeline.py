@@ -12,7 +12,11 @@ from loanlens.pipeline import (
 )
 
 CLEAN = ApplicationDetails(
-    applicant_name="Priya Shah", age=34, annual_income=50_000, loan_amount=10_000, employment_status="employed"
+    applicant_name="Priya Shah",
+    age=34,
+    annual_income=50_000,
+    loan_amount=10_000,
+    employment_status="employed",
 )
 NO_AGE = CLEAN.model_copy(update={"age": None})
 MINOR = CLEAN.model_copy(update={"age": 17})
@@ -24,8 +28,12 @@ def message_for(details):
     """A realistic applicant message that says what the fake extractor 'finds'.
     (The age guard discards an age the applicant never typed.)"""
     age = f", {details.age}" if details.age is not None else ""
-    return [HumanMessage(f"I'm {details.applicant_name}{age}, {details.employment_status}, "
-                         f"£{details.annual_income:,.0f} a year, want £{details.loan_amount:,.0f}")]
+    return [
+        HumanMessage(
+            f"I'm {details.applicant_name}{age}, {details.employment_status}, "
+            f"£{details.annual_income:,.0f} a year, want £{details.loan_amount:,.0f}"
+        )
+    ]
 
 
 def run(fake_structured_model, details):

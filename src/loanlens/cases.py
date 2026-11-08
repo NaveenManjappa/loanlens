@@ -1,39 +1,27 @@
-"""A case is a LangGraph thread.
+"""Operations on a case. A case is a LangGraph thread: every message for the same applicant goes to
+the same thread_id, and the checkpointer saves the state after every step, so the next message
+continues from the saved case.
 
-Every message for the same applicant goes to the same thread_id. The checkpointer saves the state
-after every step, so the next message continues from the saved case. start_run resets the per-run
-keys, so one run's flags never leak into the next. This module also recovers a case after the
-provider's content filter blocks a message (ADR 0002).
+    continue_application   an applicant message: run the pipeline, or hold it during a review
+    awaiting_underwriter   the pending review, if the case is paused
+    submit_decision        resume a paused case with the underwriter's decision
+
+This module also recovers a case after the provider's content filter blocks a message (ADR 0002).
 """
 
+import logging
+from typing import Any
 
-from langgraph.types import Overwrite
 import openai
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command
 
 from loanlens.pii import redact_at_boundary
-from langchain_core.messages import AIMessage, HumanMessage
+from loanlens.underwriting import review_payload
 
-
-def start_run(state) -> dict:
-    """First node of every run: reset the per-run keys and keep the conversation.
-
-    Keys with a reducer are reset with Overwrite: returning a plain empty value would be merged
-    into the old one instead of replacing it.
-    """
-    return {
-        "risk_flags":Overwrite([]),
-        "outcome":"in_progress",
-        "decision_hint":None,
-        "held_messages":Overwrite([]),
-        "specialist_reports":Overwrite({})
-    }
-
-
-def thread_config(thread_id: str) -> dict:
-    return {"configurable": {"thread_id": thread_id}}
-
-
-# ── Content-filter recovery (ADR 0002) ─────────────────────────────────────
+logger = logging.getLogger(__name__)
 
 BLOCKED_REPLY = (
     "Sorry, we couldn't process that message. "
@@ -42,80 +30,108 @@ BLOCKED_REPLY = (
 WITHHELD = "[message withheld]"
 
 
-def is_content_filter_error(exc: BaseException) -> bool:
-    """True if exc means the provider's content filter refused the request.
+def thread_config(case_id: str) -> RunnableConfig:
+    return {"configurable": {"thread_id": case_id}}
 
-    That is a blocked prompt (an error whose .code is "content_filter", Azure's HTTP 400) or a
-    blocked completion (openai.ContentFilterFinishReasonError). Anything else is re-raised by the caller.
+
+# ── Reading a case ─────────────────────────────────────────────────────────
+
+
+def awaiting_underwriter(graph: CompiledStateGraph, case_id: str) -> dict[str, Any] | None:
+    """The review payload if the case is paused for an underwriter, otherwise None.
+
+    A paused case whose interrupt marker was cleared by update_state (hold_for_underwriter does
+    this) still has underwriter_review as its next step, so it's rebuilt from the state.
     """
-    return (
-        getattr(exc, "code", None) == "content_filter"
-        or isinstance(exc, openai.ContentFilterFinishReasonError)
-    )
+    snapshot = graph.get_state(thread_config(case_id))
+    for task in snapshot.tasks:
+        if task.interrupts:
+            return task.interrupts[0].value
+    if snapshot.next == ("underwriter_review",):
+        return review_payload(snapshot.values)
+    return None
 
 
-def withhold_blocked_message(graph, thread_id: str) -> None:
-    """Repair a case after a content-filter block.
-
-    The blocked message is already checkpointed, and every later run would resend it and be blocked
-    again. It's replaced by a placeholder with the same message id (so add_messages replaces it rather
-    than appending), a fixed reply is added, and the update is recorded as request_missing_info, so the
-    run ends cleanly and the next message starts a normal run.
-    """
-    state = graph.get_state(thread_config(thread_id)).values
-    messages = state["messages"]
-    for m in reversed(messages):
-        if isinstance(m, HumanMessage):
-            blocked_id = m.id
-            break
-    else:
-        raise ValueError("No HumanMessage found in the case's messages")
-    graph.update_state(
-        thread_config(thread_id),
-        {
-            "messages": [
-                HumanMessage(WITHHELD, id=blocked_id),
-                AIMessage(BLOCKED_REPLY),
-            ],
-            "outcome": "awaiting_information",
-        },
-        as_node="request_missing_info",
-    )
+# ── Changing a case ────────────────────────────────────────────────────────
 
 
-def continue_application(graph, thread_id: str, text: str) -> dict:
+def continue_application(graph: CompiledStateGraph, case_id: str, text: str) -> dict[str, Any]:
     """Send one applicant message into their case and return the case state.
 
     The text is redacted before it enters the graph, so raw PII never reaches a checkpoint. While a
     review is pending, the message is held for the underwriter instead of starting a new run.
     """
-    from loanlens.underwriting import awaiting_underwriter  # avoid circular import
-    if awaiting_underwriter(graph, thread_id):
-        from loanlens.underwriting import hold_for_underwriter  # avoid circular import
-        hold_for_underwriter(graph, thread_id, text)
-        return graph.get_state(thread_config(thread_id)).values
-    
+    if awaiting_underwriter(graph, case_id) is not None:
+        hold_for_underwriter(graph, case_id, text)
+        return graph.get_state(thread_config(case_id)).values
+
     try:
-        return graph.invoke(
-            {"messages": [redact_at_boundary(text)]},
-            thread_config(thread_id),
-        )
+        state = graph.invoke({"messages": [redact_at_boundary(text)]}, thread_config(case_id))
     except Exception as exc:
         if not is_content_filter_error(exc):
             raise
-        withhold_blocked_message(graph, thread_id)
-        return graph.get_state(thread_config(thread_id)).values
+        logger.warning("case %s: message blocked by the content filter and withheld", case_id)
+        withhold_blocked_message(graph, case_id)
+        return graph.get_state(thread_config(case_id)).values
 
-def current_outcome(graph, thread_id: str) -> str | None:
-    """The case's current outcome, read without running anything."""
-    return graph.get_state(thread_config(thread_id)).values.get("outcome")
+    logger.info("case %s: run finished with outcome %s", case_id, state.get("outcome"))
+    return state
 
 
-def decisions_made(graph, thread_id: str) -> list[str]:
-    """The outcome of every completed run of the case, oldest first."""
-    outcomes = []
-    for snapshot in graph.get_state_history(thread_config(thread_id)):
-        if not snapshot.next:
-            outcomes.append(snapshot.values["outcome"])
-    return list(reversed(outcomes))
-    
+def hold_for_underwriter(graph: CompiledStateGraph, case_id: str, text: str) -> None:
+    """Attach a (redacted) applicant message to a case under review, without running the graph (ADR 0001)."""
+    message = redact_at_boundary(text)
+    graph.update_state(
+        thread_config(case_id),
+        {"messages": [message], "held_messages": [message.content]},
+    )
+    logger.info("case %s: applicant message held for the underwriter", case_id)
+
+
+def submit_decision(graph: CompiledStateGraph, case_id: str, decision: dict[str, Any]) -> dict[str, Any]:
+    """Resume the paused case with the underwriter's decision (underwriting.underwriter_review validates it)."""
+    logger.info(
+        "case %s: underwriter %s submitted decision %s",
+        case_id,
+        decision.get("underwriter_id"),
+        decision.get("decision"),
+    )
+    return graph.invoke(Command(resume=decision), thread_config(case_id))
+
+
+# ── Content-filter recovery (ADR 0002) ─────────────────────────────────────
+
+
+def is_content_filter_error(exc: BaseException) -> bool:
+    """True if exc means the provider's content filter refused the request.
+
+    That's a blocked prompt (an error whose .code is "content_filter": Azure's HTTP 400) or a
+    blocked completion (openai.ContentFilterFinishReasonError).
+    """
+    blocked_prompt = getattr(exc, "code", None) == "content_filter"
+    blocked_completion = isinstance(exc, openai.ContentFilterFinishReasonError)
+    return blocked_prompt or blocked_completion
+
+
+def withhold_blocked_message(graph: CompiledStateGraph, case_id: str) -> None:
+    """Repair a case after a content-filter block.
+
+    The blocked message is already checkpointed, so every later run would resend it and be blocked
+    again. It's replaced by a placeholder with the same message id (add_messages replaces a message
+    with a matching id instead of appending), a fixed reply is added, and the update is recorded as
+    request_missing_info, so the run ends cleanly and the next message starts a normal run.
+    """
+    messages = graph.get_state(thread_config(case_id)).values["messages"]
+    human_messages = [m for m in messages if isinstance(m, HumanMessage)]
+    if not human_messages:
+        raise ValueError(f"case {case_id}: no applicant message to withhold")
+    blocked_id = human_messages[-1].id
+
+    graph.update_state(
+        thread_config(case_id),
+        {
+            "messages": [HumanMessage(WITHHELD, id=blocked_id), AIMessage(BLOCKED_REPLY)],
+            "outcome": "awaiting_information",
+        },
+        as_node="request_missing_info",
+    )

@@ -1,18 +1,23 @@
 """Cases as threads: persistence, per-run resets and the decision history."""
 
+from helpers import current_outcome, decisions_made
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Overwrite
 
-from loanlens.cases import continue_application, current_outcome, decisions_made, start_run
+from loanlens.cases import continue_application
 from loanlens.extraction import ApplicationDetails
-from loanlens.pipeline import build_graph
+from loanlens.pipeline import build_graph, start_run
 
 TOM_NO_AGE = ApplicationDetails(
     applicant_name="Tom Reid", age=None, annual_income=60_000, loan_amount=8_000, employment_status="employed"
 )
 TOM_COMPLETE = TOM_NO_AGE.model_copy(update={"age": 41})
 SAM_SELF_EMPLOYED = ApplicationDetails(
-    applicant_name="Sam Jones", age=29, annual_income=40_000, loan_amount=5_000, employment_status="self_employed"
+    applicant_name="Sam Jones",
+    age=29,
+    annual_income=40_000,
+    loan_amount=5_000,
+    employment_status="self_employed",
 )
 SAM_NOW_EMPLOYED = SAM_SELF_EMPLOYED.model_copy(update={"employment_status": "employed"})
 ALEX_17 = ApplicationDetails(
@@ -31,7 +36,7 @@ def pipeline(fake):
 def test_start_run_resets_scratch_but_not_messages():
     out = start_run({"risk_flags": ["under_18"], "outcome": "declined", "messages": ["keep me"]})
     assert isinstance(out["risk_flags"], Overwrite), "an append reducer needs Overwrite to really clear"
-    assert out["outcome"] == "in_progress" and out["decision_hint"] is None
+    assert out["outcome"] == "in_progress"
     assert "messages" not in out
 
 
@@ -64,7 +69,9 @@ def test_without_a_checkpointer_nothing_is_remembered(scripted_structured_model)
     graph = build_graph(scripted_structured_model([TOM_NO_AGE, TOM_COMPLETE]))
     graph.invoke({"messages": [("user", "first")]})
     second = graph.invoke({"messages": [("user", "second")]})
-    assert [m.content for m in second["messages"] if m.type == "human"] == ["second"], "the first run is forgotten"
+    assert [m.content for m in second["messages"] if m.type == "human"] == ["second"], (
+        "the first run is forgotten"
+    )
 
 
 # ── The leftover trap ──────────────────────────────────────────────────────
@@ -97,4 +104,6 @@ def test_no_raw_pii_in_any_checkpoint(scripted_structured_model):
     graph = pipeline(scripted_structured_model([TOM_COMPLETE]))
     continue_application(graph, "case-tom", "Tom, 41, NI AB 12 34 56 C, £60k, want £8,000")
     for snapshot in graph.get_state_history({"configurable": {"thread_id": "case-tom"}}):
-        assert "AB 12 34 56 C" not in str(snapshot.values), f"raw NI number at step {snapshot.metadata['step']}"
+        assert "AB 12 34 56 C" not in str(snapshot.values), (
+            f"raw NI number at step {snapshot.metadata['step']}"
+        )

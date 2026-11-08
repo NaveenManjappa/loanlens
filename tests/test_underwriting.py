@@ -1,19 +1,19 @@
 """Human-in-the-loop review: interrupt, validation and resume."""
 
+from helpers import current_outcome, decisions_made
 from langgraph.checkpoint.memory import InMemorySaver
 
-from loanlens.cases import continue_application, current_outcome, decisions_made
+from loanlens.cases import awaiting_underwriter, continue_application, submit_decision
 from loanlens.extraction import ApplicationDetails
 from loanlens.pipeline import build_graph
-from loanlens.underwriting import (
-    awaiting_underwriter,
-    review_payload,
-    route_after_review,
-    submit_decision,
-)
+from loanlens.underwriting import review_payload, route_after_review, validate_decision
 
 SAM = ApplicationDetails(
-    applicant_name="Sam Jones", age=29, annual_income=40_000, loan_amount=5_000, employment_status="self_employed"
+    applicant_name="Sam Jones",
+    age=29,
+    annual_income=40_000,
+    loan_amount=5_000,
+    employment_status="self_employed",
 )
 PRIYA = ApplicationDetails(
     applicant_name="Priya Shah", age=34, annual_income=42_000, loan_amount=8_000, employment_status="employed"
@@ -34,13 +34,31 @@ def referred_case(fake):
 
 def test_review_payload_shows_what_the_underwriter_needs():
     p = review_payload({"application": {"age": 29}, "risk_flags": ["x"], "messages": ["..."]})
-    assert p == {"application": {"age": 29}, "risk_flags": ["x"], "error": None, "applicant_updates": [], "specialist_reports": {}}
+    assert p == {
+        "application": {"age": 29},
+        "risk_flags": ["x"],
+        "error": None,
+        "applicant_updates": [],
+        "specialist_reports": {},
+    }
+
+
+def test_validate_decision():
+    assert validate_decision(APPROVE) is None
+    assert "object" in validate_decision("approve")
+    assert "decision must be" in validate_decision({**APPROVE, "decision": "maybe"})
+    assert "reason" in validate_decision({**APPROVE, "reason": "  "})
+    assert "underwriter_id" in validate_decision({**APPROVE, "underwriter_id": ""})
 
 
 def test_route_after_review():
     assert route_after_review({"review_error": "missing reason"}) == "underwriter_review"
-    assert route_after_review({"review_error": None, "underwriter_decision": APPROVE}) == "approve_in_principle"
-    assert route_after_review({"review_error": None, "underwriter_decision": DECLINE}) == "underwriter_decline"
+    assert (
+        route_after_review({"review_error": None, "underwriter_decision": APPROVE}) == "approve_in_principle"
+    )
+    assert (
+        route_after_review({"review_error": None, "underwriter_decision": DECLINE}) == "underwriter_decline"
+    )
 
 
 # ── Pause ──────────────────────────────────────────────────────────────────

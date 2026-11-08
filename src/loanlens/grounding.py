@@ -9,7 +9,9 @@ apply exactly the same rule.
 
 import re
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
+
+from loanlens.state import PipelineState
 
 
 def age_in_text(age: int | None, text: str) -> bool:
@@ -23,16 +25,15 @@ def age_in_text(age: int | None, text: str) -> bool:
     return re.search(rf"(?<![£\d.,]){age}(?![.,]?\d)", text) is not None
 
 
-def applicant_text(messages: list) -> str:
+def applicant_text(messages: list[BaseMessage]) -> str:
     """The text of the applicant's own messages; LoanLens's replies are not evidence."""
     return "\n".join(str(m.content) for m in messages if isinstance(m, HumanMessage))
 
 
-def ground_age(state) -> dict:
+def ground_age(state: PipelineState) -> dict:
     """Node: discard the extracted age if the applicant never wrote it (otherwise an empty update)."""
     age = state["application"].get("age")
     text = applicant_text(state["messages"])
     if age_in_text(age, text):
         return {}
     return {"application": {**state["application"], "age": None}}
-

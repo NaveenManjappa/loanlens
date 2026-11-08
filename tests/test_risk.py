@@ -1,20 +1,21 @@
-"""The create_agent risk investigator: middleware order, tool errors and policy in code.
+"""The risk agent: its tools, middleware order, tool errors and policy in code.
 
-Live (real model):  LOANLENS_LIVE=1 uv run pytest tests/test_investigator_v2.py -m live
+Live (real model):  LOANLENS_LIVE=1 uv run pytest tests/test_risk.py -m live
 """
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 
-from loanlens.investigator_v2 import (
+from loanlens.risk import (
     MAX_MODEL_CALLS,
-    apply_policy,
-    build_agent,
-    make_request,
+    TOOLS,
+    build_risk_agent,
+    calculate_affordability,
     on_tool_error,
+    risk_verdict,
 )
-from loanlens.tools import TOOLS
+from loanlens.specialists import make_request
 
 SAM = {
     "applicant_name": "Sam Jones",
@@ -53,6 +54,47 @@ def run(agent):
     return agent.invoke({"messages": [make_request(SAM)]})["messages"]
 
 
+# ── calculate_affordability ────────────────────────────────────────────────
+
+
+def test_calculate_affordability_maths():
+    out = calculate_affordability.invoke(
+        {"annual_income": 36_000, "existing_monthly_debt": 300, "loan_amount": 9_000, "term_months": 36}
+    )
+    assert out == {"monthly_repayment": 250.0, "debt_to_income": 0.18, "affordable": True}
+
+
+def test_calculate_affordability_over_the_limit():
+    out = calculate_affordability.invoke(
+        {"annual_income": 33_600, "existing_monthly_debt": 450, "loan_amount": 20_000}
+    )
+    assert out["monthly_repayment"] == 555.56
+    assert out["debt_to_income"] == 0.36
+    assert out["affordable"] is True
+    out = calculate_affordability.invoke(
+        {"annual_income": 24_000, "existing_monthly_debt": 450, "loan_amount": 20_000}
+    )
+    assert out["affordable"] is False
+
+
+def test_calculate_affordability_rejects_zero_income():
+    out = calculate_affordability.invoke(
+        {"annual_income": 0, "existing_monthly_debt": 0, "loan_amount": 1_000}
+    )
+    assert "error" in out
+
+
+def test_tool_schema_is_what_the_model_sees():
+    """The model only sees the name, description (docstring) and argument schema."""
+    assert set(calculate_affordability.args) == {
+        "annual_income",
+        "existing_monthly_debt",
+        "loan_amount",
+        "term_months",
+    }
+    assert "affordable" in calculate_affordability.description
+
+
 # ── on_tool_error ──────────────────────────────────────────────────────────
 
 
@@ -73,12 +115,12 @@ def test_on_tool_error_lets_bugs_propagate():
     assert on_tool_error(KeyError("bug"), _Request()) is None
 
 
-# ── build_agent: the happy path ────────────────────────────────────────────
+# ── build_risk_agent: the happy path ───────────────────────────────────────
 
 
 def test_agent_is_a_langgraph_graph_with_your_tools(scripted_model):
     model = scripted_model([AIMessage("REFER TO SENIOR UNDERWRITER\n- x")])
-    agent = build_agent(model)
+    agent = build_risk_agent(model)
     assert {"model", "tools"} <= set(agent.get_graph().nodes)
     run(agent)
     assert set(model.bound_tools) == {t.name for t in TOOLS}
@@ -87,7 +129,7 @@ def test_agent_is_a_langgraph_graph_with_your_tools(scripted_model):
 
 def test_agent_loops_then_stops_naturally(scripted_model):
     model = scripted_model([LOOKUP_SAM, AIMessage("REFER TO SENIOR UNDERWRITER\n- 2 missed payments")])
-    messages = run(build_agent(model))
+    messages = run(build_risk_agent(model))
     assert [m.type for m in messages] == ["human", "ai", "tool", "ai"]
     assert '"missed_payments_12m": 2' in messages[2].content
 
@@ -98,7 +140,7 @@ def test_agent_loops_then_stops_naturally(scripted_model):
 def test_outage_is_retried_then_reported_to_the_model(scripted_model):
     bureau, attempts = make_failing_bureau(ConnectionError)
     model = scripted_model([LOOKUP_SAM, AIMessage("REFER TO SENIOR UNDERWRITER\n- bureau unavailable")])
-    messages = run(build_agent(model, tools=[bureau], retry_initial_delay=0))
+    messages = run(build_risk_agent(model, tools=[bureau], retry_initial_delay=0))
     assert attempts["n"] == 3, "1 call + 2 retries"
     tool_msg = next(m for m in messages if isinstance(m, ToolMessage))
     assert tool_msg.status == "error"
@@ -110,18 +152,18 @@ def test_bugs_are_not_retried_and_fail_loudly(scripted_model):
     bureau, attempts = make_failing_bureau(ValueError)
     model = scripted_model([LOOKUP_SAM, AIMessage("done")])
     with pytest.raises(ValueError):
-        run(build_agent(model, tools=[bureau], retry_initial_delay=0))
+        run(build_risk_agent(model, tools=[bureau], retry_initial_delay=0))
     assert attempts["n"] == 1, "a bug isn't transient: no retries"
 
 
 def test_stubborn_agent_hits_the_model_call_limit(scripted_model):
     model = scripted_model([LOOKUP_SAM])  # asks for the same tool forever
-    messages = run(build_agent(model))
+    messages = run(build_risk_agent(model))
     assert len(model.calls) == MAX_MODEL_CALLS
     assert "limit" in messages[-1].content.lower()
 
 
-# ── apply_policy: the rule the model can't overrule ────────────────────────
+# ── risk_verdict: the rule the model can't overrule ────────────────────────
 
 
 def _conversation(lookup_status, final_text):
@@ -135,18 +177,20 @@ def _conversation(lookup_status, final_text):
 
 def test_policy_keeps_the_models_recommendation_when_checks_ran():
     msgs = _conversation("success", "  DECLINE \n- DTI 0.62")
-    assert apply_policy(msgs) == "DECLINE"
+    assert risk_verdict(msgs) == "DECLINE"
 
 
 def test_policy_overrules_approve_when_credit_check_failed():
     msgs = _conversation("error", "APPROVE\n- looks fine")
-    assert apply_policy(msgs) == "REFER TO SENIOR UNDERWRITER"
+    assert risk_verdict(msgs) == "REFER TO SENIOR UNDERWRITER"
 
 
 def test_policy_ignores_errors_from_other_tools():
     msgs = _conversation("success", "APPROVE\n- fine")
-    msgs.insert(3, ToolMessage("err", tool_call_id="call_9", name="verify_self_employed_income", status="error"))
-    assert apply_policy(msgs) == "APPROVE"
+    msgs.insert(
+        3, ToolMessage("err", tool_call_id="call_9", name="verify_self_employed_income", status="error")
+    )
+    assert risk_verdict(msgs) == "APPROVE"
 
 
 # ── LIVE ───────────────────────────────────────────────────────────────────
@@ -154,10 +198,12 @@ def test_policy_ignores_errors_from_other_tools():
 
 @pytest.mark.live
 def test_live_agent_handles_a_bureau_outage():
+    from loanlens.llm import get_model
+
     bureau, attempts = make_failing_bureau(ConnectionError)
     others = [t for t in TOOLS if t.name != "lookup_credit_file"]
-    messages = build_agent(tools=[bureau, *others], retry_initial_delay=0).invoke(
+    messages = build_risk_agent(get_model(), tools=[bureau, *others], retry_initial_delay=0).invoke(
         {"messages": [make_request(SAM)]}, {"recursion_limit": 100}
     )["messages"]
     assert attempts["n"] >= 3
-    assert apply_policy(messages) == "REFER TO SENIOR UNDERWRITER"
+    assert risk_verdict(messages) == "REFER TO SENIOR UNDERWRITER"

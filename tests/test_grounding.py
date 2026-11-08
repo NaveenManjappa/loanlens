@@ -35,7 +35,11 @@ def test_age_in_text_rejects_money():
 
 def test_applicant_text_keeps_human_messages_only():
     text = applicant_text(
-        [HumanMessage("Tom, plumber"), AIMessage("How old are you? You must be 18 or over."), HumanMessage("I'm 40")]
+        [
+            HumanMessage("Tom, plumber"),
+            AIMessage("How old are you? You must be 18 or over."),
+            HumanMessage("I'm 40"),
+        ]
     )
     assert "Tom, plumber" in text and "I'm 40" in text
     assert "18" not in text, "LoanLens's own words don't count as evidence"
@@ -53,13 +57,19 @@ def test_guard_discards_an_invented_age_and_keeps_everything_else():
 
 
 def test_guard_changes_nothing_when_the_age_is_grounded():
-    state = {"messages": [HumanMessage("Priya, 34, nurse")], "application": {"applicant_name": "Priya", "age": 34}}
+    state = {
+        "messages": [HumanMessage("Priya, 34, nurse")],
+        "application": {"applicant_name": "Priya", "age": 34},
+    }
     assert ground_age(state) == {}, "no change -> return an empty update"
 
 
 def test_guard_ignores_numbers_loanlens_wrote():
     state = {
-        "messages": [HumanMessage("Tom, plumber"), AIMessage("Applicants must be 18 or over. How old are you?")],
+        "messages": [
+            HumanMessage("Tom, plumber"),
+            AIMessage("Applicants must be 18 or over. How old are you?"),
+        ],
         "application": {"age": 18},
     }
     assert ground_age(state)["application"]["age"] is None
@@ -74,7 +84,11 @@ def test_evaluator_and_guard_share_one_rule():
 
 def test_guard_runs_between_extraction_and_validation(scripted_structured_model):
     priya = ApplicationDetails(
-        applicant_name="Priya Shah", age=34, annual_income=42_000, loan_amount=8_000, employment_status="employed"
+        applicant_name="Priya Shah",
+        age=34,
+        annual_income=42_000,
+        loan_amount=8_000,
+        employment_status="employed",
     )
     graph = build_graph(scripted_structured_model([priya]), checkpointer=InMemorySaver())
     order = []
@@ -89,11 +103,17 @@ def test_guard_runs_between_extraction_and_validation(scripted_structured_model)
 
 def test_invented_age_makes_loanlens_ask(scripted_structured_model):
     invented = ApplicationDetails(
-        applicant_name="Jordan Lee", age=22, annual_income=31_000, loan_amount=3_000, employment_status="employed"
+        applicant_name="Jordan Lee",
+        age=22,
+        annual_income=31_000,
+        loan_amount=3_000,
+        employment_status="employed",
     )
     graph = build_graph(scripted_structured_model([invented]), checkpointer=InMemorySaver())
     final = continue_application(
-        graph, "case-jordan", "Jordan Lee, employed teacher, graduated last summer, £31,000 salary, want £3,000"
+        graph,
+        "case-jordan",
+        "Jordan Lee, employed teacher, graduated last summer, £31,000 salary, want £3,000",
     )
     assert final["outcome"] == "awaiting_information"
     assert "age" in final["missing_fields"]
@@ -101,7 +121,11 @@ def test_invented_age_makes_loanlens_ask(scripted_structured_model):
 
 def test_age_given_in_a_later_reply_is_accepted(scripted_structured_model):
     no_age = ApplicationDetails(
-        applicant_name="Tom Reid", age=None, annual_income=60_000, loan_amount=8_000, employment_status="employed"
+        applicant_name="Tom Reid",
+        age=None,
+        annual_income=60_000,
+        loan_amount=8_000,
+        employment_status="employed",
     )
     with_age = no_age.model_copy(update={"age": 40})
     graph = build_graph(scripted_structured_model([no_age, with_age]), checkpointer=InMemorySaver())

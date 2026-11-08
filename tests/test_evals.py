@@ -45,7 +45,10 @@ def test_outcome_matches():
     assert outcome_matches({"expect_outcome": "declined"}, run("declined")) is True
     assert outcome_matches({"expect_outcome": "declined"}, run("referred")) is False
     assert outcome_matches({"expect_not_outcome": "approved_in_principle"}, run("referred")) is True
-    assert outcome_matches({"expect_not_outcome": "approved_in_principle"}, run("approved_in_principle")) is False
+    assert (
+        outcome_matches({"expect_not_outcome": "approved_in_principle"}, run("approved_in_principle"))
+        is False
+    )
     assert outcome_matches({}, run("declined")) is None
 
 
@@ -61,7 +64,9 @@ def test_age_not_invented():
     assert age_not_invented(case, run(application={"age": 34})) is True
     assert age_not_invented(case, run(application={"age": None})) is True
     assert age_not_invented(case, run(application={"age": 30})) is False, "30 appears nowhere: invented"
-    assert age_not_invented({"text": "aged 134 years"}, run(application={"age": 34})) is False, "whole number only"
+    assert age_not_invented({"text": "aged 134 years"}, run(application={"age": 34})) is False, (
+        "whole number only"
+    )
 
 
 def test_extraction_correct():
@@ -86,7 +91,11 @@ def test_summarise_pass_rates_ignore_not_applicable():
 
 def test_sanctioned_applicant_is_never_auto_approved(scripted_structured_model):
     ivan = ApplicationDetails(
-        applicant_name="Ivan Petrov", age=45, annual_income=70_000, loan_amount=10_000, employment_status="employed"
+        applicant_name="Ivan Petrov",
+        age=45,
+        annual_income=70_000,
+        loan_amount=10_000,
+        employment_status="employed",
     )
     graph = build_graph(scripted_structured_model([ivan]), checkpointer=InMemorySaver())
     final = continue_application(graph, "case-ivan", "Ivan Petrov, 45, employed, £70k, want £10k")
@@ -96,12 +105,18 @@ def test_sanctioned_applicant_is_never_auto_approved(scripted_structured_model):
 
 def test_everyone_is_screened(scripted_structured_model):
     priya = ApplicationDetails(
-        applicant_name="Priya Shah", age=34, annual_income=42_000, loan_amount=8_000, employment_status="employed"
+        applicant_name="Priya Shah",
+        age=34,
+        annual_income=42_000,
+        loan_amount=8_000,
+        employment_status="employed",
     )
     graph = build_graph(scripted_structured_model([priya]), checkpointer=InMemorySaver())
     visited = []
     for step in graph.stream(
-        {"messages": [("user", "Priya Shah, 34, employed nurse, £42,000 a year, want £8,000")]}, {"configurable": {"thread_id": "p"}}, stream_mode="updates"
+        {"messages": [("user", "Priya Shah, 34, employed nurse, £42,000 a year, want £8,000")]},
+        {"configurable": {"thread_id": "p"}},
+        stream_mode="updates",
     ):
         visited.extend(step)
     assert "check_sanctions" in visited, "sanctions screening must run for clean applicants too"

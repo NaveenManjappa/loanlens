@@ -8,17 +8,18 @@ import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from loanlens.extraction import (
-    EXTRACTION_PROMPT,
-    ApplicationDetails,
-    build_graph,
-    make_extract_node,
-)
+from loanlens.extraction import EXTRACTION_PROMPT, ApplicationDetails, make_extract_node
 
 FIELDS = {"applicant_name", "age", "annual_income", "loan_amount", "employment_status"}
-EMAIL = HumanMessage("Hi, I'm Priya Shah, 34, employed as a nurse on £3,500 a month. I'd like to borrow £12,000.")
+EMAIL = HumanMessage(
+    "Hi, I'm Priya Shah, 34, employed as a nurse on £3,500 a month. I'd like to borrow £12,000."
+)
 EXPECTED = ApplicationDetails(
-    applicant_name="Priya Shah", age=34, annual_income=42_000, loan_amount=12_000, employment_status="employed"
+    applicant_name="Priya Shah",
+    age=34,
+    annual_income=42_000,
+    loan_amount=12_000,
+    employment_status="employed",
 )
 
 
@@ -72,18 +73,6 @@ def test_node_returns_application_as_plain_dict(fake_structured_model):
     assert type(out["application"]) is dict
 
 
-# ── The graph (with a fake model) ──────────────────────────────────────────
-
-
-def test_graph_end_to_end_with_fake_model(fake_structured_model):
-    final = build_graph(fake_structured_model(EXPECTED)).invoke({"messages": [EMAIL]})
-    assert final["application"]["annual_income"] == 42_000
-    assert final["messages"][0].content == EMAIL.content
-
-
-# ── LIVE: the real model (skipped unless LOANLENS_LIVE=1) ─────────────────
-
-
 # ── Employment status policy ───────────────────────────────────────────────
 # employment_status is set only when the applicant states it or uses words that clearly imply it
 # ("employed", "salary", "work for/at", "self-employed", "freelance", "contractor", "retired",
@@ -98,6 +87,16 @@ def test_prompt_states_the_employment_status_policy():
     assert "job title" in prompt, "say explicitly that a job title alone is not an employment status"
 
 
+# ── LIVE: the real model (skipped unless LOANLENS_LIVE=1) ─────────────────
+
+
+def extract_live(message: HumanMessage) -> dict:
+    """Run the extract_details node on the real model."""
+    from loanlens.llm import get_model
+
+    return make_extract_node(get_model())({"messages": [message]})["application"]
+
+
 JOB_TITLE_ONLY = [
     "Chris Taylor, 41, plumber, about £38,000 a year, looking for £5,000.",
     "Jordan Lee, 31, teacher, £31,000 a year, would like £3,000.",
@@ -109,7 +108,7 @@ JOB_TITLE_ONLY = [
 @pytest.mark.parametrize("text", JOB_TITLE_ONLY)
 def test_live_job_title_alone_is_not_an_employment_status(text):
     for _ in range(3):  # consistency is the point: the same facts must get the same answer
-        app = build_graph().invoke({"messages": [HumanMessage(text)]})["application"]
+        app = extract_live(HumanMessage(text))
         assert app["employment_status"] is None, f"inferred {app['employment_status']!r} from a job title"
 
 
@@ -123,13 +122,13 @@ def test_live_job_title_alone_is_not_an_employment_status(text):
     ],
 )
 def test_live_stated_employment_is_extracted(text, status):
-    app = build_graph().invoke({"messages": [HumanMessage(text)]})["application"]
+    app = extract_live(HumanMessage(text))
     assert app["employment_status"] == status
 
 
 @pytest.mark.live
 def test_live_converts_monthly_income_to_annual():
-    app = build_graph().invoke({"messages": [EMAIL]})["application"]
+    app = extract_live(EMAIL)
     assert app["annual_income"] == 42_000
     assert app["employment_status"] == "employed"
 
@@ -137,7 +136,6 @@ def test_live_converts_monthly_income_to_annual():
 @pytest.mark.live
 def test_live_does_not_invent_missing_age():
     msg = HumanMessage("Tom Reid here. Self-employed plumber, about £60k a year. Looking for £8,000.")
-    app = build_graph().invoke({"messages": [msg]})["application"]
+    app = extract_live(msg)
     assert app["age"] is None, f"model invented an age: {app['age']}"
     assert app["employment_status"] == "self_employed"
-

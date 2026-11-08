@@ -1,17 +1,22 @@
-"""Screening checks, the risk_flags reducer and the parallel screening graph."""
+"""Validation, the screening checks and the risk_flags reducer."""
 
+import copy
 from typing import get_type_hints
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 
+from loanlens.compliance import check_sanctions_list, is_sanctioned
+from loanlens.extraction import ApplicationDetails
+from loanlens.pipeline import build_graph
 from loanlens.screening import (
-    ScreeningState,
-    build_graph,
     check_affordability,
     check_age,
     check_employment,
+    check_sanctions,
     combine,
+    validate_application,
 )
+from loanlens.state import PipelineState
 
 CLEAN = {
     "applicant_name": "Priya Shah",
@@ -23,7 +28,27 @@ CLEAN = {
 RISKY = dict(CLEAN, age=17, loan_amount=40_000, employment_status="self_employed")
 
 
-# ── The checks (plain functions) ───────────────────────────────────────────
+# ── validate_application ───────────────────────────────────────────────────
+
+
+def test_validate_complete_application():
+    assert validate_application({"application": CLEAN}) == {"missing_fields": [], "is_complete": True}
+
+
+def test_validate_lists_absent_and_none_fields_in_order():
+    application = {k: v for k, v in CLEAN.items() if k != "annual_income"}
+    application["age"] = None
+    result = validate_application({"application": application})
+    assert result == {"missing_fields": ["age", "annual_income"], "is_complete": False}
+
+
+def test_validate_does_not_mutate_state():
+    state = {"application": copy.deepcopy(CLEAN)}
+    validate_application(state)
+    assert state == {"application": CLEAN}
+
+
+# ── The checks ─────────────────────────────────────────────────────────────
 
 
 def test_affordability():
@@ -31,9 +56,19 @@ def test_affordability():
     assert check_affordability({"application": RISKY}) == {"risk_flags": ["high_loan_to_income"]}
 
 
+def test_affordability_flags_zero_income_instead_of_crashing():
+    assert check_affordability({"application": dict(CLEAN, annual_income=0)}) == {
+        "risk_flags": ["high_loan_to_income"]
+    }
+
+
 def test_age():
     assert check_age({"application": dict(CLEAN, age=18)}) == {"risk_flags": []}
     assert check_age({"application": dict(CLEAN, age=17)}) == {"risk_flags": ["under_18"]}
+
+
+def test_age_zero_is_under_18():
+    assert check_age({"application": dict(CLEAN, age=0)}) == {"risk_flags": ["under_18"]}
 
 
 def test_employment():
@@ -45,62 +80,47 @@ def test_employment():
     assert flags("self_employed") == {"risk_flags": ["self_employed_needs_review"]}
 
 
-def test_combine_refer():
-    out = combine({"risk_flags": ["under_18", "high_loan_to_income"]})
-    assert out["decision_hint"] == "refer"
-    assert len(out["messages"]) == 1, "return only the NEW message"
-    text = out["messages"][0].content
-    assert "refer" in text and "high_loan_to_income, under_18" in text
+def test_sanctions():
+    assert check_sanctions({"application": CLEAN}) == {"risk_flags": []}
+    assert check_sanctions({"application": dict(CLEAN, applicant_name="  Ivan PETROV ")}) == {
+        "risk_flags": ["sanctions_match"]
+    }
 
 
-def test_combine_clear():
-    out = combine({"risk_flags": []})
-    assert out["decision_hint"] == "clear"
-    assert "none" in out["messages"][0].content
+def test_sanctions_tool_and_screening_use_the_same_lookup():
+    for name in ("Ivan Petrov", "Priya Shah"):
+        assert check_sanctions_list.invoke({"applicant_name": name}) == {
+            "on_sanctions_list": is_sanctioned(name)
+        }
+    assert is_sanctioned(None) is False
 
 
-# ── The state schema ───────────────────────────────────────────────────────
+def test_combine_is_only_a_join_point():
+    assert combine({"risk_flags": ["under_18"]}) == {}
 
 
-def test_risk_flags_has_a_reducer():
-    hint = get_type_hints(ScreeningState, include_extras=True)["risk_flags"]
-    reducer = getattr(hint, "__metadata__", None)
-    assert reducer, (
-        "risk_flags has no reducer, so parallel writes will clash. "
-        "Use Annotated[list[str], <reducer>]."
+# ── Parallel checks in the pipeline ────────────────────────────────────────
+
+
+def test_risk_flags_reducer_appends():
+    hint = get_type_hints(PipelineState, include_extras=True)["risk_flags"]
+    reducer = hint.__metadata__[0]
+    assert reducer(["a"], ["b"]) == ["a", "b"], "parallel checks must append, not overwrite"
+
+
+def test_pipeline_collects_flags_from_all_parallel_checks(fake_structured_model):
+    details = ApplicationDetails(
+        applicant_name="Ivan Petrov",
+        age=45,
+        annual_income=20_000,
+        loan_amount=15_000,
+        employment_status="self_employed",
     )
-    assert reducer[0](["a"], ["b"]) == ["a", "b"], "the reducer should APPEND lists"
-
-
-# ── The graph ──────────────────────────────────────────────────────────────
-
-
-def test_checks_fan_out_from_start():
-    edges = {(e.source, e.target) for e in build_graph().get_graph().edges}
-    for check in ("check_affordability", "check_age", "check_employment"):
-        assert ("__start__", check) in edges, f"START should go straight to {check}"
-        assert (check, "combine") in edges, f"{check} should go to combine"
-
-
-def test_graph_collects_flags_from_all_parallel_checks():
-    final = build_graph().invoke({"application": RISKY})
+    graph = build_graph(fake_structured_model(details))
+    text = "Ivan Petrov, 45, self-employed, £20,000 a year, want £15,000"
+    final = graph.invoke({"messages": [HumanMessage(text)]})
     assert sorted(final["risk_flags"]) == [
         "high_loan_to_income",
+        "sanctions_match",
         "self_employed_needs_review",
-        "under_18",
     ]
-    assert final["decision_hint"] == "refer"
-
-
-def test_graph_clean_application():
-    final = build_graph().invoke({"application": CLEAN})
-    assert final["risk_flags"] == []
-    assert final["decision_hint"] == "clear"
-
-
-def test_messages_are_appended_not_overwritten():
-    note = HumanMessage("Applicant note: I'm starting a new job next month.")
-    final = build_graph().invoke({"application": CLEAN, "messages": [note]})
-    assert len(final["messages"]) == 2
-    assert final["messages"][0].content == note.content  # the original survived
-    assert isinstance(final["messages"][-1], AIMessage)

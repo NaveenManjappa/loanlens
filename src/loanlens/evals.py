@@ -9,12 +9,16 @@ pass rates. Run: uv run python scripts/run_evals.py
 import json
 import uuid
 from pathlib import Path
+from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler, UsageMetadataCallbackHandler
+from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.memory import InMemorySaver
 
 from loanlens.grounding import age_in_text
 from loanlens.pii import redact_at_boundary
+from loanlens.pipeline import build_graph
+from loanlens.specialists import default_specialists
 
 DATASET = Path(__file__).resolve().parents[2] / "evals" / "dataset.json"
 
@@ -29,16 +33,16 @@ def load_dataset() -> list[dict]:
 class PromptRecorder(BaseCallbackHandler):
     """A LangChain callback: sees every chat-model call anywhere in the graph, incl. inside agents."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.prompts: list[str] = []
 
-    def on_chat_model_start(self, serialized, messages, **kwargs):
+    def on_chat_model_start(self, serialized, messages, **kwargs) -> None:
         self.prompts.append("\n".join(str(m.content) for batch in messages for m in batch))
 
 
-def run_case(case: dict, build_graph) -> dict:
-    """Run one case end to end on build_graph(checkpointer=...) and record what happened."""
-    graph = build_graph(checkpointer=InMemorySaver())
+def run_case(case: dict, model: BaseChatModel) -> dict[str, Any]:
+    """Run one case end to end through the full pipeline (with specialists) and record what happened."""
+    graph = build_graph(model, InMemorySaver(), default_specialists(model))
     prompts, usage = PromptRecorder(), UsageMetadataCallbackHandler()
     thread = f"eval-{case['id']}-{uuid.uuid4().hex[:6]}"
     # Callbacks passed at invoke time flow down to every model call in the run, agents included.
@@ -97,11 +101,13 @@ def age_not_invented(case: dict, run: dict) -> bool | None:
 
 def extraction_correct(case: dict, run: dict) -> bool | None:
     """Reference-based: each expect_<field> (other than the outcome keys) matches the extracted field."""
-    expect_keys = [k for k in case if k.startswith("expect_") and k not in ("expect_outcome", "expect_not_outcome")]
+    expect_keys = [
+        k for k in case if k.startswith("expect_") and k not in ("expect_outcome", "expect_not_outcome")
+    ]
     if not expect_keys:
         return None
     for expect_key in expect_keys:
-        field = expect_key[len("expect_"):]
+        field = expect_key[len("expect_") :]
         expected_value = case[expect_key]
         actual_value = run["application"].get(field)
         if isinstance(expected_value, (int, float)) and isinstance(actual_value, (int, float)):
@@ -129,4 +135,3 @@ def summarise(results: list[dict]) -> dict:
         pass_rate = passes / (passes + fails) if (passes + fails) > 0 else 0.0
         summary[name] = round(pass_rate, 2)
     return summary
-
