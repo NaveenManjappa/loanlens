@@ -123,7 +123,7 @@ sometimes inferred "employed" and sometimes didn't. That's now an explicit polic
 employment status is set only when stated or clearly implied, otherwise LoanLens asks. The `job-title-only`
 case tests it.
 
-The unit-test suite (150+ tests) uses fake models only, so it's free, deterministic and runs in CI on every push.
+The unit-test suite (140+ tests) uses fake models only, so it's free, deterministic and runs in CI on every push.
 
 ## Run it locally
 
@@ -133,6 +133,7 @@ Requires [uv](https://docs.astral.sh/uv/) and an Azure OpenAI deployment.
 uv sync
 cp .env.example .env                 # add your Azure OpenAI endpoint, key and deployment name
 uv run pytest                        # the full suite, with fake models (no API calls)
+uv run ruff check . && uv run ruff format --check .   # lint + formatting
 uv run uvicorn loanlens.main:app --reload
 ```
 
@@ -154,15 +155,16 @@ Deployment: [docs/deploy-azure.md](docs/deploy-azure.md).
 
 ```
 src/loanlens/
-  pipeline.py        the graph: state, nodes, routing, build_graph()
+  pipeline.py        the graph: nodes, routing, build_graph()
+  state.py           PipelineState, the one state schema (and its reducers)
   pii.py             boundary redaction + PIIMiddleware for agents
   extraction.py      LLM extraction into a typed Pydantic schema
   grounding.py       the age guard (shared with the evaluator)
-  intake.py          validation        screening.py   policy checks + sanctions
-  specialists.py     specialist agents as nodes; merge reducer
-  investigator_v2.py risk agent (create_agent + middleware)    compliance.py   compliance agent
-  underwriting.py    human review (interrupt / resume), holding messages during review
-  cases.py           a case = a thread: continue, inspect, content-filter recovery
+  screening.py       validation + parallel policy checks, including sanctions
+  specialists.py     specialist agents as nodes
+  risk.py            risk agent + its tools    compliance.py   compliance agent + its tools
+  underwriting.py    human-review nodes (interrupt, validation, routing)
+  cases.py           operations on a case: continue, hold, resume, content-filter recovery
   evals.py           eval runner and evaluators
   api.py · main.py   FastAPI app       checkpointing.py · locks.py   Postgres/SQLite + case locks
 tests/               one spec file per feature, fake models only

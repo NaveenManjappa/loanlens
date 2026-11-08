@@ -5,5 +5,5 @@ __pycache__/
 .pytest_cache/
 *.db
 loanlens_cases.db-wal
-.gitignore
 loanlens_cases.db-shm
+.DS_Store
