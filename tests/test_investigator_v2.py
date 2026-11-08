@@ -1,7 +1,6 @@
-"""Lesson 6 spec.
+"""The create_agent risk investigator: middleware order, tool errors and policy in code.
 
-Offline:  uv run pytest tests/test_lesson06_create_agent.py -v
-Live:     LOANLENS_LIVE=1 uv run pytest tests/test_lesson06_create_agent.py -v -m live
+Live (real model):  LOANLENS_LIVE=1 uv run pytest tests/test_investigator_v2.py -m live
 """
 
 import pytest

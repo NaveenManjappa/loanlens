@@ -1,17 +1,4 @@
-"""Lesson 1 spec. Run: (loanlens) naveenmanjappa@NAVEENs-MacBook-Air loanlens % uv run pytest tests/test_lesson01_intake.py -v
-================================================================ test session starts ================================================================
-platform darwin -- Python 3.13.15, pytest-9.2.0, pluggy-1.7.0 -- /Users/naveenmanjappa/Naveen/Matt Pocock/Langgraph/loanlens/.venv/bin/python
-cachedir: .pytest_cache
-rootdir: /Users/naveenmanjappa/Naveen/Matt Pocock/Langgraph/loanlens
-configfile: pyproject.toml
-plugins: langsmith-0.14.16, anyio-4.15.1
-collected 0 items                                                                                                                                   
-
-=============================================================== no tests ran in 0.00s ===============================================================
-ERROR: file or directory not found: tests/test_lesson01_intake.py
-
-Work top to bottom: the node tests first (plain functions!), then the graph tests.
-"""
+"""Intake: validation, ratios and the standalone intake graph."""
 
 import copy
 

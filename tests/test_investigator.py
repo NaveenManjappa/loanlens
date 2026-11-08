@@ -1,7 +1,6 @@
-"""Lesson 5 spec.
+"""The hand-built agent loop: tools, the stopping condition and the hard cap.
 
-Offline (scripted fake model):  uv run pytest tests/test_lesson05_investigator.py -v
-Live (your Foundry model):      LOANLENS_LIVE=1 uv run pytest tests/test_lesson05_investigator.py -v -m live
+Live (real model):  LOANLENS_LIVE=1 uv run pytest tests/test_investigator.py -m live
 """
 
 import json
@@ -40,7 +39,7 @@ def ai_calls(*calls):
 FINAL = AIMessage("REFER TO SENIOR UNDERWRITER\n- 2 missed payments\n- debt_to_income 0.36")
 
 
-# ── The tool you wrote ─────────────────────────────────────────────────────
+# ── calculate_affordability ────────────────────────────────────────────────
 
 
 def test_calculate_affordability_maths():
@@ -90,7 +89,7 @@ def test_should_continue_hard_cap_beats_tool_calls():
     assert should_continue(state) == "escalate"
 
 
-# ── tool_node: you run the tools the model asked for ───────────────────────
+# ── tool_node: runs the tools the model asked for ──────────────────────────
 
 
 def test_tool_node_runs_every_call_and_links_ids():

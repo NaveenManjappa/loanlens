@@ -1,18 +1,4 @@
-"""Lesson 10 spec. Run: uv run pytest tests/test_lesson10_multi_agent.py -v
-
-Changes to make:
-  pipeline.py
-    - PipelineState: add  specialist_reports: Annotated[dict, merge_reports]
-    - build_graph(model=None, checkpointer=None, specialists=None)
-        specialists is a dict {name: (agent, verdict_fn)}.
-        If specialists is None:  use default_specialists() ONLY when model is None (the real app);
-                                 when a test passes a fake model, use {} (no specialists).
-        For each specialist: add_node(f"{name}_specialist", make_specialist_node(name, agent, verdict))
-        Wiring:   with specialists:  refer_to_underwriter -> each specialist -> underwriter_review
-                  without:           refer_to_underwriter -> underwriter_review   (as in Lesson 9)
-  cases.py      start_run: also reset  "specialist_reports": Overwrite({})
-  underwriting.py  review_payload: also return  "specialist_reports": state.get("specialist_reports", {})
-"""
+"""Specialist agents as nodes: private context, merged reports and the review payload."""
 
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver

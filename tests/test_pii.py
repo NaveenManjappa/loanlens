@@ -1,4 +1,4 @@
-"""Lesson 7 spec. Run: uv run pytest tests/test_lesson07_pii.py -v"""
+"""PII detection and redaction: the patterns, the redact_pii node and PIIMiddleware."""
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -17,7 +17,7 @@ def types(text):
     return [m["type"] for m in find_pii(text)]
 
 
-# ── Patterns: spec → regex ─────────────────────────────────────────────────
+# ── Patterns ───────────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize("nino", ["AB 12 34 56 C", "AB123456C", "ce 10 20 30 d", "JZ 99 88 77 A"])

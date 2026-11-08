@@ -1,14 +1,8 @@
-"""Lesson 5: the tools the risk investigator agent can call.
+"""Tools for the risk-investigator agent.
 
-A tool is a plain function + a name + a description + typed arguments.
-The MODEL never runs a tool. It only *asks* for one (a "tool call"); your
-graph runs it and sends the result back as a ToolMessage.
-
-The docstring IS the description the model reads when deciding what to call,
-so write it for the model: what it does, when to use it, what comes back.
-
-Two tools are done (they fake external systems with canned data).
-YOU write calculate_affordability: plain arithmetic, exposed as a tool.
+The model never runs a tool: it asks for one, and the graph runs it and returns a ToolMessage. Each
+docstring is the description the model reads. lookup_credit_file and verify_self_employed_income fake
+external systems with canned data.
 """
 
 from langchain_core.tools import tool
@@ -23,7 +17,7 @@ _CREDIT_FILES = {
         "credit_score": 640,
         "missed_payments_12m": 2,
         "existing_monthly_debt": 450,
-        # Real bureau files carry bank details. The model must never see these (Lesson 7).
+        # Real bureau files carry bank details. The model must never see these.
         "bank_details": {"sort_code": "20-45-77", "account_number": "41234567"},
     },
     "tom reid": {"credit_score": 910, "missed_payments_12m": 0, "existing_monthly_debt": 0},

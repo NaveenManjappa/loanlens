@@ -1,17 +1,7 @@
-"""Lesson 1 — the LoanLens intake pipeline. Your first StateGraph (no LLM yet).
+"""Intake: validate an extracted application.
 
-    START -> validate_application -> compute_ratios -> summarise -> END
-
-YOUR JOB: replace every `raise NotImplementedError` so that
-    uv run pytest tests/test_lesson01_intake.py
-goes green. Read the test file first — it is the spec.
-
-Rules of the game (from the LangGraph Graph API docs):
-  * A node is a plain function: it receives the WHOLE state, and returns a
-    dict containing ONLY the keys it wants to change (a "partial update").
-  * Never mutate `state` in place. Return a new dict instead.
-  * Edges say which node runs next. START and END are special built-in nodes.
-  * You must .compile() the builder before you can .invoke() it.
+validate_application is part of the pipeline. compute_ratios, summarise and build_graph form a
+small standalone intake graph used in tests.
 """
 
 from typing import TypedDict
@@ -40,32 +30,17 @@ class IntakeState(TypedDict, total=False):
 
 
 def validate_application(state: IntakeState) -> dict:
-    """Return {"missing_fields": [...], "is_complete": bool}.
+    """Return missing_fields (in REQUIRED_FIELDS order) and is_complete.
 
-    A field counts as missing if the key is absent OR its value is None.
-    Keep missing_fields in the same order as REQUIRED_FIELDS.
+    A field is missing if its key is absent or its value is None.
     """
-    # resturnValue = {"missing_fields": [], "is_complete": True}
-    # for key in REQUIRED_FIELDS:
-    #     if key not in state["application"]:
-    #         resturnValue["missing_fields"].append(key)
-    #         resturnValue["is_complete"] = False
-    #     elif state["application"][key] is None:
-    #         resturnValue["missing_fields"].append(key)
-    #         resturnValue["is_complete"] = False
-    # return resturnValue
     app = state["application"]
     missing = [field for field in REQUIRED_FIELDS if app.get(field) is None]
     return {"missing_fields": missing, "is_complete": not missing}
 
 
 def compute_ratios(state: IntakeState) -> dict:
-    """Return {"loan_to_income": loan_amount / annual_income, rounded to 2 dp}.
-
-    If either value is missing (or income is 0), return {"loan_to_income": None}
-    instead of crashing.  (Notice how ugly this defensive check feels —
-    Lesson 4 replaces it with routing.)
-    """
+    """Loan-to-income ratio to 2 dp, or None if a value is missing or income is 0."""
     if (
         not "loan_amount" in state["application"]
         or not "annual_income" in state["application"]
@@ -87,21 +62,12 @@ def compute_ratios(state: IntakeState) -> dict:
 
 
 def summarise(state: IntakeState) -> dict:
-    """Return {"status": "ready_for_review"} if the application is complete,
-    otherwise {"status": "incomplete"}."""
-    # if state["is_complete"]:
-    #     return {"status": "ready_for_review"}
-    # else:
-    #     return {"status": "incomplete"}
+    """Status for the standalone intake graph: ready_for_review or incomplete."""
     return {"status": "ready_for_review" if state["is_complete"] else "incomplete"}
 
 
 def build_graph():
-    """Wire the three nodes in a straight line and return the COMPILED graph.
-
-    Steps: create StateGraph(IntakeState) -> add_node x3 -> add_edge x4 -> compile().
-    Use the function names as node names.
-    """
+    """Standalone intake graph: validate_application -> compute_ratios -> summarise."""
     builder = StateGraph(IntakeState)
     builder.add_node(validate_application)
     builder.add_node(compute_ratios)

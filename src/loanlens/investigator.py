@@ -1,30 +1,23 @@
-"""Lesson 5: the risk investigator, LoanLens's first true AGENT, built by hand.
+"""A risk-investigator agent loop built by hand in LangGraph (reference implementation).
 
-            ┌──────────────────────────────┐
-            v                              │
-  START -> investigator --(should_continue)┼--> tools ──┘     (model asked for tools)
-                                           ├--> END            (natural stop: no tool calls)
-                                           └--> escalate -> END (hard cap: too many rounds)
+    START -> investigator --should_continue--+--> tools --> investigator   (the loop)
+                                             +--> END                      (natural stop)
+                                             +--> escalate --> END         (hard cap)
 
-The model decides which tools to call, in what order, and when it's done.
-YOU decide the guard rails: which tools exist, and the hard cap.
-
-YOUR JOB:  uv run pytest tests/test_lesson05_investigator.py -v  -> green
-  1. calculate_affordability (in tools.py)   2. make_investigator_node
-  3. tool_node                               4. should_continue
-  5. build_graph
+The pipeline uses investigator_v2 (create_agent + middleware); this version shows the same loop
+without the prebuilt agent.
 """
 
-import json  # noqa: F401  (tool results are dicts; ToolMessage content must be a string)
-from typing import Literal  # noqa: F401
+import json
+from typing import Literal
 
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage  # noqa: F401
-from langgraph.graph import END, START, MessagesState, StateGraph  # noqa: F401
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+from langgraph.graph import END, START, MessagesState, StateGraph
 
 from loanlens.tools import TOOLS
 
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
-MAX_TOOL_ROUNDS = 5  # the HARD CAP from your Lesson 0 stopping condition
+MAX_TOOL_ROUNDS = 5  # hard cap on tool rounds
 
 INVESTIGATOR_PROMPT = """You are a loan risk investigator at a UK lender.
 The application below was referred for manual review. Investigate it with your tools, then
@@ -42,11 +35,7 @@ class InvestigationState(MessagesState, total=False):
 
 
 def make_investigator_node(model):
-    """Return the node. Inside it:
-    1. bind the tools:    model.bind_tools(TOOLS)
-    2. invoke it with     [SystemMessage(INVESTIGATOR_PROMPT.format(application=...)), *state["messages"]]
-                          (json.dumps(state["application"]) makes a tidy application string)
-    3. return {"messages": [response]}   (the AIMessage, possibly carrying .tool_calls)"""
+    """Build the agent node: the model with tools bound, prompted with the application."""
 
     def investigator(state: InvestigationState) -> dict:
         model_with_tools = model.bind_tools(TOOLS)
@@ -66,12 +55,7 @@ def make_investigator_node(model):
 
 
 def tool_node(state: InvestigationState) -> dict:
-    """Run EVERY tool call in the last AIMessage (there can be several).
-    For each call:  tool = TOOLS_BY_NAME[call["name"]];  result = tool.invoke(call["args"])
-                    -> ToolMessage(content=json.dumps(result), tool_call_id=call["id"])
-    If the name isn't a known tool, DON'T crash: return a ToolMessage whose content
-    starts with "Error: unknown tool" so the model can recover.
-    Also return "tool_rounds": previous value (default 0) + 1."""
+    """Run every tool call in the last AIMessage; an unknown tool returns an error the model can read."""
     tool_rounds = state.get("tool_rounds", 0)
     tool_rounds += 1
     last_message = state["messages"][-1]
@@ -98,11 +82,7 @@ def tool_node(state: InvestigationState) -> dict:
 
 
 def should_continue(state: InvestigationState) -> Literal["tools", "escalate", END]:
-    """The stopping condition, in code:
-    - hard cap:     tool_rounds >= MAX_TOOL_ROUNDS            -> "escalate"
-    - natural stop: last message has no tool_calls            -> END
-    - otherwise:    the model wants tools                     -> "tools"
-    (Check the hard cap FIRST. Why? Answer that when you report back.)"""
+    """Stopping condition: the hard cap first, then the natural stop when no tools are requested."""
     tool_rounds = state.get("tool_rounds", 0)
     last_message = state["messages"][-1]
     if tool_rounds >= MAX_TOOL_ROUNDS:
@@ -125,11 +105,7 @@ def escalate(state: InvestigationState) -> dict:
 
 
 def build_graph(model=None):
-    """Nodes: "investigator" (make_investigator_node(model)), "tools" (tool_node), "escalate".
-    Edges: START -> investigator;  investigator --should_continue--> tools / escalate / END
-           tools -> investigator   (<- THIS edge is what makes it a loop)
-           escalate -> END
-    If model is None: from loanlens.llm import get_model."""
+    """Compile the agent loop."""
     if model is None:
         from loanlens.llm import get_model
 
@@ -145,5 +121,4 @@ def build_graph(model=None):
     )
     builder.add_edge("tools", "investigator")
     builder.add_edge("escalate", END)
-    # builder.add_edge("investigator", END)
     return builder.compile()

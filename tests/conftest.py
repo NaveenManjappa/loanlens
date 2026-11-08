@@ -62,7 +62,7 @@ class FakeToolModel:
         self.calls.append(list(messages))
         i = min(len(self.calls) - 1, len(self.script) - 1)
         # Fresh copy with a new id each time: add_messages REPLACES messages that share
-        # an id (Lesson 2!), so replaying the same object would overwrite, not append.
+        # an id, so replaying the same object would overwrite, not append.
         return self.script[i].model_copy(update={"id": str(uuid.uuid4())})
 
 
@@ -71,7 +71,7 @@ def fake_tool_model():
     return FakeToolModel
 
 
-# ── Lesson 6: create_agent needs a REAL chat-model class, so this fake subclasses BaseChatModel ──
+# ── create_agent needs a REAL chat-model class, so this fake subclasses BaseChatModel ──
 
 from langchain_core.language_models.chat_models import BaseChatModel  # noqa: E402
 from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
@@ -110,7 +110,7 @@ def scripted_model():
 
 class ScriptedStructuredModel(FakeStructuredModel):
     """Like FakeStructuredModel, but answers from a LIST, one per call (last one repeats).
-    `all_sent` records the messages of every call. Lesson 8: one model across several runs."""
+    `all_sent` records the messages of every call. One model across several runs."""
 
     def __init__(self, answers):
         super().__init__(answers[0])

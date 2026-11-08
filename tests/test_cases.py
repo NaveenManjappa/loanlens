@@ -1,4 +1,4 @@
-"""Lesson 8 spec. Run: uv run pytest tests/test_lesson08_persistence.py -v"""
+"""Cases as threads: persistence, per-run resets and the decision history."""
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Overwrite
@@ -71,8 +71,8 @@ def test_without_a_checkpointer_nothing_is_remembered(scripted_structured_model)
 
 
 def test_yesterdays_flags_do_not_leak_into_todays_decision(scripted_structured_model):
-    # (Updated in Lesson 9: a REFERRED case now pauses for the underwriter, so this test uses a
-    #  declined case instead, which finishes and leaves its flags behind in the checkpoint.)
+    # A declined case (a referred one would pause for the underwriter) finishes and leaves its
+    # flags behind in the checkpoint.
     graph = pipeline(scripted_structured_model([ALEX_17, ALEX_18]))
     first = continue_application(graph, "case-alex", "Alex, 17, employed, £30k, want £2k")
     assert first["outcome"] == "declined" and first["risk_flags"] == ["under_18"]

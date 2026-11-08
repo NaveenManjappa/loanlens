@@ -1,6 +1,6 @@
 # ADR 0002: Harmful and off-topic input: rely on the provider's content filter
 
-**Status:** Accepted. The required error handling (below) is designed but not built. The audit log is deferred.
+**Status:** Accepted. The required error handling (below) is implemented in `cases.py`. The audit log is deferred.
 **Date:** November 2026
 
 ## Context
@@ -64,7 +64,7 @@ so **every future turn is blocked too**. The case is stuck for good.
 - **Required before deployment: handle a blocked request.** Catch `content_filter` errors from any model
   call, then:
   1. replace the blocked message in state with `[message withheld]`, using the **same message id**, so that
-     `add_messages` replaces it rather than appending (the Lesson 7 technique);
+     `add_messages` replaces it rather than appending (the same technique as boundary redaction);
   2. reply with a fixed, calm message;
   3. make sure the next turn works normally.
 

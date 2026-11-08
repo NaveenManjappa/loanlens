@@ -1,13 +1,4 @@
-"""Lesson 12 spec. Run: uv run pytest tests/test_lesson12_api.py -v
-
-Part A (cases.py): a message blocked by Azure's content filter must not break the case (ADR 0002).
-  1. is_content_filter_error   2. withhold_blocked_message   (stubs are in cases.py)
-  3. continue_application: wrap the graph.invoke(...) in try/except Exception as exc:
-       content-filter error -> withhold_blocked_message(graph, thread_id), then return
-                               graph.get_state(thread_config(thread_id)).values
-       anything else        -> raise   (re-raise it unchanged)
-Part B (api.py):   LoanLens behind HTTP. Every test uses fake models: free and offline.
-"""
+"""The HTTP API and content-filter recovery (ADR 0002). Fake models only: free and offline."""
 
 import openai
 import pytest

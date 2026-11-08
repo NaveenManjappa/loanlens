@@ -1,4 +1,4 @@
-# Lesson 12: on every push to main, run the tests; if they pass, build the image and
+# on every push to main, run the tests; if they pass, build the image and
 # publish it to GitHub Container Registry (ghcr.io). Deploying to Azure stays a manual
 # step (docs/deploy-azure.md), so you choose which version goes live.
 name: Test and publish image

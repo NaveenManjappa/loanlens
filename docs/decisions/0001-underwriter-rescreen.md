@@ -1,6 +1,6 @@
 # ADR 0001: Messages during underwriter review, and re-screening
 
-**Status:** Part 1 implemented (Lesson 9 stretch). Part 2 designed, not built.
+**Status:** Part 1 implemented. Part 2 designed, not built.
 **Date:** November 2026
 
 ## Context
@@ -18,7 +18,7 @@ submits a decision and a reason. Two gaps were found:
 
 ### Part 1: Hold, don't run (implemented)
 While a review is pending, `continue_application` does **not** invoke the graph. `hold_for_underwriter`
-redacts the message (boundary redaction, Lesson 7) and attaches it to the case with `update_state`
+redacts the message (boundary redaction) and attaches it to the case with `update_state`
 (`messages` + `held_messages`). The underwriter sees it as `applicant_updates` in the review payload.
 Only the underwriter's decision moves the case forward.
 

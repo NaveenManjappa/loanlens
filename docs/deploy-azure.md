@@ -1,6 +1,6 @@
 # Deploying LoanLens to Azure Container Apps (near-zero cost)
 
-A runbook for Lesson 12. The API runs on **Azure Container Apps**. The image is built by
+How LoanLens is deployed. The API runs on **Azure Container Apps**. The image is built by
 **GitHub Actions** and stored on **GitHub Container Registry** (ghcr.io). The cases live in a free
 **Neon** Postgres database in London. Traces go to **LangSmith**.
 
@@ -36,7 +36,7 @@ az provider register --namespace Microsoft.OperationalInsights
    `postgresql://user:password@ep-xxxx.eu-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require`.
 3. Optional check from your Mac. A case should survive a "restart":
    ```bash
-   LOANLENS_PG_URL='<the connection string>' uv run pytest tests/test_lesson12_checkpointing.py -v
+   LOANLENS_PG_URL='<the connection string>' uv run pytest tests/test_checkpointing.py -v
    ```
 
 The free plan suspends the database after 5 minutes without traffic. The next query wakes it in
@@ -53,7 +53,7 @@ The workflow `.github/workflows/publish-image.yml` runs on every push to `main`:
 To use it:
 
 ```bash
-git add -A && git commit -m "Lesson 12: API, Docker, deploy workflow" && git push
+git add -A && git commit -m "Deploy LoanLens" && git push
 ```
 
 Then open the repo on GitHub → **Actions** and watch the run. When it's green, the image appears
@@ -114,10 +114,10 @@ az containerapp update -n $APP -g $RG --set-env-vars \
   LANGSMITH_PROJECT=loanlens LANGSMITH_HIDE_INPUTS=true
 ```
 
-Use the same workspace variables as in Lesson 11. If your workspace is agent-based, replace
+Use the variables that match your LangSmith workspace. If it is agent-based, replace
 `LANGSMITH_PROJECT` with `LANGSMITH_AGENT_ID` and `LANGSMITH_AGENT_ENVIRONMENT`. If your LangSmith
 account is in the EU region, also add `LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com`.
-`LANGSMITH_HIDE_INPUTS=true` keeps model inputs out of the traces (Lesson 7's leak path 4).
+`LANGSMITH_HIDE_INPUTS=true` keeps model inputs (customer data) out of the traces.
 
 ## 5. Try it
 
@@ -156,12 +156,15 @@ curl $URL/cases/demo-1
 ## 7. Redeploy after a code change
 
 ```bash
-git push                                   # wait for the workflow run to go green
-az containerapp update -n $APP -g $RG --image $IMAGE:$(git rev-parse HEAD)
+git push                                   # then wait for the workflow run to go green
+echo $APP $RG $IMAGE                       # all three must print; in a new terminal, redo step 3
+az containerapp update --name $APP --resource-group $RG --image $IMAGE:$(git rev-parse HEAD)
 ```
 
-Settings and secrets are kept. Each update creates a new **revision**, so you can always see which
-commit is live.
+`git rev-parse HEAD` prints your current commit's full id, and the workflow tagged the image with
+the same id, so this runs the image built from exactly that commit. If the commit isn't pushed, or its
+workflow run hasn't finished, that image doesn't exist yet and the update fails. Settings and secrets
+are kept, and each update creates a new **revision**, so you can always see which commit is live.
 
 ## 8. Clean up
 

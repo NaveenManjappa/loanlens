@@ -1,4 +1,4 @@
-"""Lesson 0 smoke test: can LoanLens talk to the model deployed in your Microsoft Foundry resource?
+"""Smoke test: can LoanLens talk to the model deployed in your Microsoft Foundry resource?
 
 Run:  uv run python scripts/smoke_test.py
 """

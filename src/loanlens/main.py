@@ -1,14 +1,7 @@
-"""Lesson 12: the real app, as uvicorn runs it. Done for you.
+"""The application uvicorn runs:  uv run uvicorn loanlens.main:app --reload
 
-    uv run uvicorn loanlens.main:app --reload --app-dir src    (local: SQLite file)
-    DATABASE_URL=postgresql://... uvicorn loanlens.main:app      (deployed: Postgres; the
-                                                                  Dockerfile sets PYTHONPATH)
-
---app-dir src: the project isn't installed as a package, so Python only finds `loanlens`
-if src/ is on its import path (pytest gets this from `pythonpath` in pyproject.toml).
-
-Configuration comes ONLY from environment variables (12-factor): the same image runs
-on your laptop and in Azure; only the environment differs. Secrets never go in the image.
+Configuration comes only from environment variables, so the same image runs locally and in Azure.
+Without DATABASE_URL, cases are kept in a local SQLite file; with it, in Postgres.
 """
 
 import os
@@ -28,7 +21,7 @@ async def lifespan(app):
     # Runs once at startup: open the database, build the graph (and its real model).
     with open_backend(os.getenv("DATABASE_URL")) as backend:
         app.state.graph = build_graph(checkpointer=backend.checkpointer)
-        app.state.locks = backend.locks  # one run per case at a time (Lesson 12 stretch)
+        app.state.locks = backend.locks  # one run per case at a time
         yield
     # ...and once at shutdown: the `with` closes the database connections.
 

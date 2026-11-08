@@ -1,7 +1,8 @@
-"""Lesson 10: a second specialist agent, the compliance checker. (Done for you; read it.)
+"""The compliance specialist agent (create_agent + tools + PII middleware).
 
-Same shape as Lesson 6's risk investigator: create_agent + tools + middleware.
-Different job: it doesn't judge creditworthiness, it checks rules that must be followed regardless.
+It doesn't judge creditworthiness: it checks rules that apply regardless, such as sanctions and
+Consumer Duty vulnerability markers. Sanctions screening of every applicant is plain code
+(is_sanctioned, used by screening.check_sanctions); the agent's tool repeats it for its report.
 """
 
 from langchain.agents import create_agent
@@ -16,8 +17,11 @@ _VULNERABILITY_MARKERS = {"tom reid": ["recent bereavement (self-declared)"]}
 
 
 def is_sanctioned(applicant_name: str | None) -> bool:
-    """Plain-code sanctions lookup (Lesson 11 fix). Name-only matching can give false
-    positives, so a match must go to a HUMAN, never straight to approve or decline."""
+    """Plain-code sanctions lookup.
+
+    Name-only matching can produce false positives, so a match must go to a human, never straight
+    to approve or decline.
+    """
     return bool(applicant_name) and applicant_name.strip().lower() in _SANCTIONS_LIST
 
 

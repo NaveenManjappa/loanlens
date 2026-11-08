@@ -1,13 +1,4 @@
-"""Lesson 9 spec. Run: uv run pytest tests/test_lesson09_hitl.py -v
-
-Changes to make in pipeline.py:
-  1. PipelineState: add   underwriter_decision: dict   and   review_error: str | None
-     (a node returning a key the state doesn't declare is SILENTLY DROPPED: Lesson 4 map!)
-  2. Nodes: add underwriter_review and underwriter_decline (import from loanlens.underwriting)
-  3. Edges: refer_to_underwriter -> underwriter_review   (REPLACE refer_to_underwriter -> END)
-            add_conditional_edges("underwriter_review", route_after_review)
-            underwriter_decline -> END
-"""
+"""Human-in-the-loop review: interrupt, validation and resume."""
 
 from langgraph.checkpoint.memory import InMemorySaver
 

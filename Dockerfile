@@ -1,4 +1,4 @@
-# LoanLens API image (Lesson 12). Build:  docker build -t loanlens .
+# LoanLens API image. Build:  docker build -t loanlens .
 FROM python:3.13-slim
 
 # uv, copied from its official image (pinned version: builds are reproducible)

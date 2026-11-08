@@ -1,16 +1,4 @@
-"""Lesson 11 spec. Run: uv run pytest tests/test_lesson11_evals.py -v
-
-Part A: evaluators (src/loanlens/evals.py). Pure functions over (case, run) records.
-Part B: the sanctions fix. Your first eval run will show `sanctioned-person` failing.
-        Fix it in code, the Lesson 0 way (a lookup is plain code, not an agent):
-  screening.py   add a check node:
-                     def check_sanctions(state) -> dict:
-                         -> {"risk_flags": ["sanctions_match"]} if is_sanctioned(application["applicant_name"]) else []
-                     (from loanlens.compliance import is_sanctioned)
-  pipeline.py    add "check_sanctions" to SCREENING_CHECKS and register the node.
-                 Any flag already routes to refer_to_underwriter, so a match reaches a HUMAN
-                 (a name match can be a false positive: never auto-decline on it either).
-"""
+"""The evaluators, and sanctions screening for every applicant."""
 
 from langgraph.checkpoint.memory import InMemorySaver
 

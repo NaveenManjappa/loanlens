@@ -1,7 +1,7 @@
-"""Lesson 3 spec.
+"""Extraction into ApplicationDetails.
 
-Offline (fake model, free):   uv run pytest tests/test_lesson03_extraction.py -v
-Live (real Foundry model):    LOANLENS_LIVE=1 uv run pytest tests/test_lesson03_extraction.py -v -m live
+Offline (fake model):  uv run pytest tests/test_extraction.py
+Live (real model):     LOANLENS_LIVE=1 uv run pytest tests/test_extraction.py -m live
 """
 
 import pytest
@@ -46,7 +46,7 @@ def test_annual_income_description_says_per_year():
 
 
 def test_prompt_has_a_no_guessing_rule():
-    assert "TODO" not in EXTRACTION_PROMPT, "write your no-invention rule into the prompt"
+    assert "TODO" not in EXTRACTION_PROMPT, "the prompt must include the no-invention rule"
 
 
 # ── The node (with a fake model) ───────────────────────────────────────────

@@ -1,19 +1,12 @@
-"""Lesson 11: evals for LoanLens. Measure, don't guess.
+"""Evals for LoanLens: a labelled dataset, a runner and evaluators.
 
-An EVAL = a dataset of cases + a way to run each one + EVALUATORS that score each run.
-One passing run proves little (Lesson 3), so the runner repeats every case and we report
-PASS RATES, plus cost signals (tokens, model calls) per case.
-
-run_case (done for you) runs one case through the real pipeline and records:
-  final state · outcome · every prompt sent to any model · token usage · number of model calls
-
-YOUR JOB:  uv run pytest tests/test_lesson11_evals.py -v  -> green
-  1-4. the four evaluators     5. summarise
-Then:  uv run python scripts/run_evals.py   (real model; ~8 cases × 2 repeats)
+run_case runs one case through the real pipeline and records the final state, every prompt sent to
+any model (including inside agents), token usage and the number of model calls. Evaluators score a
+run as True (pass), False (fail) or None (not applicable), and summarise turns repeated runs into
+pass rates. Run: uv run python scripts/run_evals.py
 """
 
 import json
-import re  # noqa: F401  (you'll want it for age_not_invented)
 import uuid
 from pathlib import Path
 
@@ -44,12 +37,12 @@ class PromptRecorder(BaseCallbackHandler):
 
 
 def run_case(case: dict, build_graph) -> dict:
-    """Run one case end to end. build_graph(checkpointer=...) -> compiled pipeline."""
+    """Run one case end to end on build_graph(checkpointer=...) and record what happened."""
     graph = build_graph(checkpointer=InMemorySaver())
     prompts, usage = PromptRecorder(), UsageMetadataCallbackHandler()
     thread = f"eval-{case['id']}-{uuid.uuid4().hex[:6]}"
     # Callbacks passed at invoke time flow down to every model call in the run, agents included.
-    # Same boundary redaction as continue_application (Lesson 7).
+    # Same boundary redaction as continue_application.
     final = graph.invoke(
         {"messages": [redact_at_boundary(case["text"])]},
         {
@@ -76,9 +69,7 @@ def run_case(case: dict, build_graph) -> dict:
 
 
 def outcome_matches(case: dict, run: dict) -> bool | None:
-    """If the case has "expect_outcome": pass when run["outcome"] equals it.
-    If it has "expect_not_outcome": pass when run["outcome"] is anything ELSE.
-    Neither key -> None."""
+    """Pass when the outcome equals expect_outcome, or differs from expect_not_outcome."""
     if "expect_outcome" in case:
         return run["outcome"] == case["expect_outcome"]
     if "expect_not_outcome" in case:
@@ -87,8 +78,7 @@ def outcome_matches(case: dict, run: dict) -> bool | None:
 
 
 def no_raw_pii_sent_to_models(case: dict, run: dict) -> bool | None:
-    """If the case has "pii_strings": pass when NONE of them appears in ANY of run["prompts"].
-    No "pii_strings" -> None."""
+    """Pass when none of the case's pii_strings appears in any prompt sent to any model."""
     if "pii_strings" not in case:
         return None
     for prompt in run["prompts"]:
@@ -99,21 +89,14 @@ def no_raw_pii_sent_to_models(case: dict, run: dict) -> bool | None:
 
 
 def age_not_invented(case: dict, run: dict) -> bool | None:
-    """Grounding check (Lesson 3's 'shape, not truth'). Uses only the INPUT TEXT, no expected answer:
-      extracted age is None                         -> True  (nothing invented)
-      extracted age's digits appear in case["text"] -> True  (grounded, e.g. r"\\b34\\b")
-      otherwise                                     -> False (the model made it up)
-    Use run["application"].get("age")."""
+    """Reference-free grounding check: an extracted age must appear in the applicant's text."""
     age = run["application"].get("age")
     text = case["text"]
     return age_in_text(age, text)
 
 
 def extraction_correct(case: dict, run: dict) -> bool | None:
-    """Reference-based: for every key starting with "expect_" EXCEPT expect_outcome and
-    expect_not_outcome (i.e. expect_age, expect_annual_income), compare with
-    run["application"][field] where field = the key without "expect_".
-    Numbers: compare as floats (42000 == 42000.0). No such keys -> None. All match -> True."""
+    """Reference-based: each expect_<field> (other than the outcome keys) matches the extracted field."""
     expect_keys = [k for k in case if k.startswith("expect_") and k not in ("expect_outcome", "expect_not_outcome")]
     if not expect_keys:
         return None
@@ -134,10 +117,7 @@ EVALUATORS = [outcome_matches, no_raw_pii_sent_to_models, age_not_invented, extr
 
 
 def summarise(results: list[dict]) -> dict:
-    """results: one dict per run: {"case_id": ..., "scores": {evaluator_name: True/False/None},
-                                   "total_tokens": int, "model_calls": int}
-    Return {evaluator_name: pass_rate} where pass_rate = passes / (passes + fails),
-    IGNORING None (not applicable). Round to 2 dp. Skip evaluators with no applicable runs."""
+    """Pass rate per evaluator, passes / (passes + fails), ignoring not-applicable runs, to 2 dp."""
     summary = {}
     for evaluator in EVALUATORS:
         name = evaluator.__name__

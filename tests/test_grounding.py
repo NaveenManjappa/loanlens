@@ -1,16 +1,4 @@
-"""Lesson 11 stretch spec: the age guard. Run: uv run pytest tests/test_lesson11b_age_guard.py -v
-
-Turn the age_not_invented EVALUATOR into a runtime GUARD (src/loanlens/grounding.py):
-    extract_details -> ground_age -> validate_application
-If the extracted age isn't in anything the APPLICANT wrote, the guard sets it to None, so
-validate_application sees a missing age and LoanLens asks for it (the Lesson 4 safety net).
-The model may still invent an age 6% of the time; the SYSTEM never acts on one.
-
-Then wire it:
-  evals.py      age_not_invented -> one line: use age_in_text (one rule, two users: eval + guard)
-  pipeline.py   register ground_age; replace the edge extract_details -> validate_application
-                with extract_details -> ground_age -> validate_application
-"""
+"""The age guard: the shared age_in_text rule, the ground_age node and its place in the pipeline."""
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import InMemorySaver

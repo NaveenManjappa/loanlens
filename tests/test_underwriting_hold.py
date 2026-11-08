@@ -1,24 +1,4 @@
-"""Lesson 9 stretch: hold_for_underwriter. Run: uv run pytest tests/test_lesson09b_hold.py -v
-
-The rule: while a case waits for an underwriter, a new applicant message must NOT start a new run
-(that would silently abandon the review). It's attached to the case and shown to the underwriter.
-
-What to change:
-  pipeline.py    PipelineState: add   held_messages: Annotated[list[str], add]
-  underwriting.py
-    - review_payload: also return "applicant_updates": state.get("held_messages", [])
-    - awaiting_underwriter: also treat  state.next == ("underwriter_review",)  as waiting
-      (rebuild the payload with review_payload(state.values) when the interrupt marker is gone)
-    - NEW hold_for_underwriter(graph, thread_id, text) -> None:
-        msg = redact_at_boundary(text)
-        graph.update_state(thread_config(thread_id), {"messages": [msg], "held_messages": [msg.content]})
-  cases.py
-    - start_run: also reset  "held_messages": Overwrite([])
-    - continue_application: if awaiting_underwriter(...) -> hold_for_underwriter(...) and return
-      graph.get_state(thread_config(thread_id)).values  (NO new run). Otherwise invoke as before.
-      Careful: underwriting.py imports from cases.py, so import underwriting INSIDE the function
-      (a top-level import both ways is a circular import).
-"""
+"""Messages that arrive while a review is pending are held for the underwriter, not run (ADR 0001)."""
 
 from langgraph.checkpoint.memory import InMemorySaver
 

@@ -1,33 +1,28 @@
-"""Lesson 12: LoanLens behind HTTP.
+"""HTTP API for LoanLens (FastAPI).
 
-    POST /cases/{case_id}/messages   applicant sends a message     -> CaseView
-    GET  /cases/{case_id}            read a case (runs nothing)    -> CaseView, 404 if unknown
-    GET  /cases/{case_id}/review     underwriter's screen          -> review payload, 404 if none pending
-    POST /cases/{case_id}/decision   underwriter decides           -> CaseView, 409 if none pending
-    GET  /health                     for Azure's health probes     -> {"status": "ok"}
+    POST /cases/{case_id}/messages   an applicant sends a message   -> CaseView
+    GET  /cases/{case_id}            read a case (runs nothing)     -> CaseView, 404 if unknown
+    GET  /cases/{case_id}/review     what the underwriter sees      -> review payload, 404 if none pending
+    POST /cases/{case_id}/decision   the underwriter decides        -> CaseView, 409 if none pending
+    GET  /health                     health probe                   -> {"status": "ok"}
 
-The API is a THIN layer: every route calls functions you already wrote (cases.py,
-underwriting.py). No business logic lives here. Validation of input is done by the
-Pydantic models below (done for you), so a bad request gets a 422 before any graph runs.
-
-The graph is NOT created here. create_app(graph) receives it (dependency injection again):
-tests pass a graph with fake models; main.py passes the real one, built at startup.
-
-YOUR JOB:  uv run pytest tests/test_lesson12_api.py -v  -> green
-  1. case_view     2. the five route bodies     3. the model_unavailable handler
+A thin layer: routes call cases.py and underwriting.py and hold no business logic. Pydantic models
+validate input, so a bad request gets a 422 before any graph runs. The compiled graph is injected
+through create_app(graph): tests pass a graph built on fake models, main.py passes the real one.
+Changes to a case run under a per-case lock (locks.py), so a concurrent request gets a 409.
 """
 
 from typing import Literal
 
 import openai
-from fastapi import Depends, FastAPI, HTTPException, Path, Request  # noqa: F401
-from fastapi.responses import JSONResponse  # noqa: F401
-from langchain_core.messages import AIMessage  # noqa: F401
+from fastapi import Depends, FastAPI, HTTPException, Path, Request
+from fastapi.responses import JSONResponse
+from langchain_core.messages import AIMessage
 from pydantic import BaseModel, Field
 
-from loanlens.cases import continue_application, thread_config  # noqa: F401
-from loanlens.locks import CaseBusy, InProcessCaseLocks  # noqa: F401
-from loanlens.underwriting import awaiting_underwriter, submit_decision  # noqa: F401
+from loanlens.cases import continue_application, thread_config
+from loanlens.locks import CaseBusy, InProcessCaseLocks
+from loanlens.underwriting import awaiting_underwriter, submit_decision
 
 # case ids become LangGraph thread ids: allow only safe characters, and never use PII
 # (an email or NI number) as a case id: ids appear in URLs and access logs.
@@ -47,7 +42,7 @@ class DecisionIn(BaseModel):
 
 
 class CaseView(BaseModel):
-    """What the outside world sees of a case. Never the raw state (Lesson 7: least exposure)."""
+    """What callers see of a case: never the raw state (least exposure)."""
 
     case_id: str
     outcome: str | None
@@ -64,12 +59,7 @@ def get_locks(request: Request):
 
 
 def case_view(graph, case_id: str) -> dict | None:
-    """Read the case with graph.get_state(thread_config(case_id)).values.
-    No values (empty dict) -> None (the case doesn't exist).
-    Otherwise return the CaseView fields:
-      outcome              values.get("outcome")
-      reply                content of the LAST AIMessage in values["messages"], or None if there isn't one
-      awaiting_underwriter awaiting_underwriter(graph, case_id) is not None"""
+    """Return the CaseView fields for a case, or None if the case doesn't exist."""
     state = graph.get_state(thread_config(case_id))
     values = state.values
     if not values:
@@ -96,9 +86,7 @@ def create_app(graph=None, lifespan=None, locks=None) -> FastAPI:
 
     @app.exception_handler(CaseBusy)
     def case_busy(request: Request, exc: CaseBusy):
-        """Lesson 12 stretch: 409 with {"detail": BUSY}.
-        Then, in send_message and decide: add `locks=Depends(get_locks)` and do the work
-        inside `with locks.hold(case_id):` (see tests/test_lesson12b_case_lock.py)."""
+        """Another request is changing this case: 409 with a fixed message."""
         return JSONResponse(
             status_code=409,
             content={"detail": BUSY},
@@ -106,9 +94,10 @@ def create_app(graph=None, lifespan=None, locks=None) -> FastAPI:
 
     @app.exception_handler(openai.APIError)
     def model_unavailable(request: Request, exc: openai.APIError):
-        """The model is down, rate-limited or unreachable. Return a 503 with
-        {"detail": UNAVAILABLE}: a FIXED message. Never echo str(exc): error text can
-        contain parts of the prompt, i.e. customer data. (Hint: JSONResponse.)"""
+        """The model is down, rate-limited or unreachable: 503 with a fixed message.
+
+        Never echo str(exc): provider error text can contain parts of the prompt, i.e. customer data.
+        """
         return JSONResponse(
             status_code=503,
             content={"detail": UNAVAILABLE},
@@ -116,19 +105,19 @@ def create_app(graph=None, lifespan=None, locks=None) -> FastAPI:
 
     @app.get("/health")
     def health() -> dict:
-        """For Azure's health probes. Return {"status": "ok"}."""
+        """Health probe."""
         return {"status": "ok"}
 
     @app.post("/cases/{case_id}/messages", response_model=CaseView)
     def send_message(body: MessageIn, case_id: str = CaseId, graph=Depends(get_graph),locks=Depends(get_locks)):
-        """continue_application(...), then return case_view(...)."""
+        """Send an applicant message into the case and return the updated view."""
         with locks.hold(case_id):
             continue_application(graph, case_id, body.text)
             return case_view(graph, case_id)
 
     @app.get("/cases/{case_id}", response_model=CaseView)
     def get_case(case_id: str = CaseId, graph=Depends(get_graph)):
-        """case_view, or HTTPException(404) if the case doesn't exist."""
+        """Read a case without running anything."""
         view = case_view(graph, case_id)
         if view is None:
             raise HTTPException(status_code=404, detail="Case not found")
@@ -136,7 +125,7 @@ def create_app(graph=None, lifespan=None, locks=None) -> FastAPI:
 
     @app.get("/cases/{case_id}/review")
     def get_review(case_id: str = CaseId, graph=Depends(get_graph),locks=Depends(get_locks)) -> dict:
-        """The payload from awaiting_underwriter, or 404 if no review is pending."""
+        """The review payload for a case paused at underwriter_review."""
         with locks.hold(case_id):
             review = awaiting_underwriter(graph, case_id)
         if review is None:
@@ -145,8 +134,10 @@ def create_app(graph=None, lifespan=None, locks=None) -> FastAPI:
 
     @app.post("/cases/{case_id}/decision", response_model=CaseView)
     def decide(body: DecisionIn, case_id: str = CaseId, graph=Depends(get_graph),locks=Depends(get_locks)):
-        """409 if no review is pending. Otherwise submit_decision(graph, case_id, body.model_dump())
-        and return case_view."""
+        """Resume a paused case with the underwriter's decision.
+
+        The pending-review check runs inside the lock: checking first and acting later would be a race.
+        """
         with locks.hold(case_id):
             if awaiting_underwriter(graph, case_id) is None:
                 raise HTTPException(status_code=409, detail="No review pending")

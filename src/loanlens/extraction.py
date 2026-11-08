@@ -1,20 +1,14 @@
-"""Lesson 3: the first LLM node. Free-text application in, typed data out.
+"""Extraction: a free-text application in, typed ApplicationDetails out.
 
-    START -> extract_details -> END
-
-The applicant's message arrives as a HumanMessage in state["messages"].
-The node asks the model for STRUCTURED OUTPUT (an ApplicationDetails object,
-not prose) and writes it to state["application"], the same shape your
-Lesson 1 and Lesson 2 graphs already consume.
-
-YOUR JOB:  uv run pytest tests/test_lesson03_extraction.py -v   -> green
-Then the real thing:  uv run python scripts/lesson03_demo.py
+The only LLM call on the main path. The model returns structured output (a Pydantic object, not
+prose), and every field is optional: anything the applicant didn't state stays None, and validation
+asks for it instead of the model guessing.
 """
 
-from typing import Literal  # noqa: F401  (you'll need it for employment_status)
+from typing import Literal
 
-from langchain_core.messages import SystemMessage  # noqa: F401
-from langgraph.graph import END, START, MessagesState, StateGraph  # noqa: F401
+from langchain_core.messages import SystemMessage
+from langgraph.graph import END, START, MessagesState, StateGraph
 from pydantic import BaseModel, Field
 
 
@@ -22,7 +16,7 @@ class ApplicationDetails(BaseModel):
     """Loan application details extracted from an applicant's message."""
 
     # Every field is Optional (`| None`): if the applicant didn't say it, we want
-    # None, NOT a guess. Lesson 1's validate_application turns None into "missing".
+    # None, NOT a guess. validate_application turns None into "missing".
     applicant_name: str | None = Field(
         default=None, description="Applicant's full name"
     )
@@ -53,13 +47,10 @@ class ExtractionState(MessagesState, total=False):
 
 
 def make_extract_node(model):
-    """Return the node function. The model is passed IN (dependency injection),
-    so tests can hand it a fake model and never call Azure."""
+    """Build the extract_details node around a model (injected, so tests can use a fake)."""
 
     def extract_details(state: ExtractionState) -> dict:
-        """1. Wrap the model:  model.with_structured_output(ApplicationDetails)
-        2. Invoke it with [SystemMessage(EXTRACTION_PROMPT), *state["messages"]]
-        3. Return {"application": <the result as a plain dict>}  (hint: .model_dump())"""
+        """Ask the model for ApplicationDetails and write it to state['application']."""
         structured = model.with_structured_output(ApplicationDetails)
         details = structured.invoke(
             [SystemMessage(EXTRACTION_PROMPT), *state["messages"]]
@@ -70,9 +61,7 @@ def make_extract_node(model):
 
 
 def build_graph(model=None):
-    """START -> extract_details -> END.  If no model is given, use the real one:
-    `from loanlens.llm import get_model` (import it INSIDE this function, so tests
-    with a fake model don't need your .env)."""
+    """A standalone extraction graph (START -> extract_details -> END), used in tests."""
     if not model:
         from loanlens.llm import get_model
 

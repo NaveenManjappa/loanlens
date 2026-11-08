@@ -1,37 +1,30 @@
-"""Lesson 9: a human underwriter signs off every referred case.
+"""Human-in-the-loop: an underwriter signs off every referred case.
 
-    ... combine --route_after_screening--> refer_to_underwriter -> underwriter_review
-                                                                       |  interrupt(): the graph PAUSES here,
-                                                                       |  saves its state, and waits (hours, days...)
-                                     route_after_review <--------------+  resumed with Command(resume=decision)
-                                       | invalid decision -> underwriter_review (ask again)
-                                       | "approve"        -> approve_in_principle -> END
-                                       | "decline"        -> underwriter_decline  -> END
+    refer_to_underwriter -> underwriter_review    interrupt(): the graph pauses and saves its state
+    route_after_review:  invalid decision -> underwriter_review (ask again)
+                         approve -> approve_in_principle;  decline -> underwriter_decline
 
-Pattern from the LangGraph docs: call interrupt() EXACTLY ONCE per node run, store any
-validation error in state, and loop back with a conditional edge. (Never `while True: interrupt()`.)
-
-YOUR JOB:  uv run pytest tests/test_lesson09_hitl.py -v  -> green
-  1. review_payload   2. underwriter_review   3. route_after_review
-  4. awaiting_underwriter   5. submit_decision
-  + pipeline.py: add 2 keys to PipelineState, 2 nodes, change refer_to_underwriter's edge (see test file top)
+interrupt() is called exactly once per node run; a validation error is stored in state and the graph
+loops back. While a review is pending, applicant messages are held for the underwriter
+(hold_for_underwriter) instead of starting a new run (ADR 0001).
 """
 
 from typing import Literal
 
 from langchain_core.messages import AIMessage
-from langgraph.types import Command, interrupt  # noqa: F401
+from langgraph.types import Command, interrupt
 
-from loanlens.cases import thread_config  # noqa: F401
-from loanlens.pii import redact_at_boundary  # noqa: F401
+from loanlens.cases import thread_config
+from loanlens.pii import redact_at_boundary
 
 ALLOWED_DECISIONS = ("approve", "decline")
 
 
 def review_payload(state) -> dict:
-    """What the underwriter's screen shows: everything they need to decide, nothing more.
-    Return {"application": ..., "risk_flags": ..., "error": state.get("review_error")}
-    (the application is already PII-redacted: Lesson 7). Must be JSON-serialisable."""
+    """What the underwriter sees: everything needed to decide, nothing more.
+
+    The application is already redacted. The payload is JSON-serialisable.
+    """
     return {
         "application": state["application"],
         "risk_flags": state["risk_flags"],
@@ -57,12 +50,11 @@ def validate_decision(decision) -> str | None:
 
 
 def underwriter_review(state) -> dict:
-    """Node. Call interrupt(review_payload(state)) EXACTLY ONCE: the return value is
-    whatever the underwriter sent via Command(resume=...).
-      invalid (validate_decision gives an error) -> return {"review_error": error}
-      valid                                      -> return {"underwriter_decision": decision, "review_error": None}
-    Remember: on resume this node RE-RUNS FROM ITS FIRST LINE. Keep everything before
-    interrupt() side-effect free (no emails, no database writes)."""
+    """Node: pause for the underwriter's decision, then validate it.
+
+    On resume this node re-runs from its first line, so everything before interrupt() must be
+    side-effect free.
+    """
     decision = interrupt(review_payload(state))
     error = validate_decision(decision)
     if error:
@@ -73,9 +65,7 @@ def underwriter_review(state) -> dict:
 def route_after_review(
     state,
 ) -> Literal["underwriter_review", "approve_in_principle", "underwriter_decline"]:
-    """review_error set                  -> "underwriter_review"  (ask again)
-    underwriter_decision["decision"] == "approve" -> "approve_in_principle"
-    otherwise                            -> "underwriter_decline\""""
+    """Invalid decision -> ask again; approve -> approve_in_principle; otherwise underwriter_decline."""
     if state.get("review_error"):
         return "underwriter_review"
     if state.get("underwriter_decision")["decision"] == "approve":
@@ -98,9 +88,11 @@ def underwriter_decline(state) -> dict:
 
 
 def awaiting_underwriter(graph, thread_id: str) -> dict | None:
-    """If the case is paused at an interrupt, return its payload, else None.
-    graph.get_state(config).tasks is a tuple of tasks; a paused task has a non-empty
-    .interrupts tuple, and each Interrupt has a .value (your review_payload)."""
+    """The review payload if the case is paused for an underwriter, otherwise None.
+
+    Also covers a paused case whose interrupt marker was cleared by update_state: its .next still
+    points at underwriter_review.
+    """
     state = graph.get_state(thread_config(thread_id))
     for task in state.tasks:
         if task.interrupts:
@@ -113,14 +105,12 @@ def awaiting_underwriter(graph, thread_id: str) -> dict | None:
 
 
 def submit_decision(graph, thread_id: str, decision: dict) -> dict:
-    """Resume the paused case with the underwriter's decision and return the result:
-    graph.invoke(Command(resume=decision), thread_config(thread_id))"""
+    """Resume the paused case with the underwriter's decision."""
     return graph.invoke(Command(resume=decision), thread_config(thread_id))
 
 
 def hold_for_underwriter(graph, thread_id: str, text: str) -> None:
-    """Hold a message from the applicant for the underwriter to see, without running the extractor again.
-    (The extractor is only called once per case, when the applicant first applies.)"""
+    """Attach a (redacted) applicant message to a case under review, without running the graph."""
     # avoid circular import
     msg = redact_at_boundary(text)
     graph.update_state(

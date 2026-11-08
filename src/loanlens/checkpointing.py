@@ -1,12 +1,8 @@
-"""Lesson 12: where the cases live, and who may change one right now. Done for you.
+"""Where cases live, and how concurrent changes to one case are prevented.
 
-Local development (no DATABASE_URL): a SQLite file, so cases survive restarts on your machine.
-Deployed (DATABASE_URL set):          Postgres, so cases survive restarts, redeploys and
-                                      several replicas serving the same case.
-The graph doesn't care which: both are checkpointers (Lesson 8).
-
-open_backend() also returns the matching CASE LOCKS (Lesson 12 stretch): in-process locks for
-one local process, Postgres advisory locks when several replicas share one database.
+Without DATABASE_URL: a SQLite file and in-process locks (one local process).
+With DATABASE_URL:    Postgres and Postgres advisory locks, so cases survive restarts and
+                      redeploys, and several replicas can safely serve the same case.
 """
 
 from contextlib import contextmanager
@@ -48,6 +44,6 @@ def open_backend(database_url: str | None = None, sqlite_path: str = "loanlens_c
 
 @contextmanager
 def open_checkpointer(database_url: str | None = None, sqlite_path: str = "loanlens_cases.db"):
-    """Just the checkpointer (kept for the Lesson 12 tests and scripts)."""
+    """Just the checkpointer (used by tests and scripts)."""
     with open_backend(database_url, sqlite_path) as backend:
         yield backend.checkpointer

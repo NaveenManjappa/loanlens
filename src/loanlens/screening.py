@@ -1,26 +1,19 @@
-"""Lesson 2: LoanLens screening. Parallel checks + reducers.
+"""Screening: policy checks that run in parallel, then combine.
 
-             ┌─> check_affordability ─┐
-    START ───┼─> check_age ───────────┼──> combine -> END
-             └─> check_employment ────┘
-
-The three checks run IN PARALLEL (same super-step) and each one writes
-to the SAME key: `risk_flags`. Make that work.
-
-YOUR JOB: make  `uv run pytest tests/test_lesson02_screening.py -v`  go green.
-Hint: one of the failing tests will only pass when you change the STATE,
-not a node. Read the error message carefully; it tells you what to do.
+Every check writes to risk_flags in the same super-step, so risk_flags has an append reducer.
+check_sanctions runs for every complete application, and a match is a flag, so it always reaches a
+human. build_graph compiles the checks as a standalone graph for tests.
 """
 
-from typing import Annotated  # noqa: F401  (you'll need this)
-from operator import add  # noqa: F401  (and probably this)
+from typing import Annotated
+from operator import add
 
-from langchain_core.messages import AIMessage  # noqa: F401
+from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from loanlens.compliance import is_sanctioned
 
-# LoanLens policy v0 (made up for the course — every rule traces back to here)
+# LoanLens policy (illustrative): every rule traces back to here
 MIN_AGE = 18
 MAX_LOAN_TO_INCOME = 0.5  # flag if loan is MORE than 50% of annual income
 
@@ -30,14 +23,12 @@ class ScreeningState(MessagesState, total=False):
     application: dict
     risk_flags: Annotated[
         list[str], add
-    ]  # TODO(Lesson 2): three parallel nodes write here. What does this key need?
+    ]  # parallel checks append here
     decision_hint: str  # "clear" | "refer"
 
 
 def check_affordability(state: ScreeningState) -> dict:
-    """Return {"risk_flags": ["high_loan_to_income"]} if loan_amount / annual_income
-    is MORE than MAX_LOAN_TO_INCOME, otherwise {"risk_flags": []}.
-    (Assume both values are present. Validation happened upstream.)"""
+    """Flag high_loan_to_income if the loan is more than MAX_LOAN_TO_INCOME of annual income."""
     loan_amount = state["application"]["loan_amount"]
     annual_income = state["application"]["annual_income"]
     risk_flags = []
@@ -47,7 +38,7 @@ def check_affordability(state: ScreeningState) -> dict:
 
 
 def check_age(state: ScreeningState) -> dict:
-    """Return {"risk_flags": ["under_18"]} if age < MIN_AGE, otherwise {"risk_flags": []}."""
+    """Flag under_18 if the applicant is younger than MIN_AGE."""
     age = state["application"]["age"]
     if not age:
         return {"risk_flags": []}
@@ -55,11 +46,7 @@ def check_age(state: ScreeningState) -> dict:
 
 
 def check_employment(state: ScreeningState) -> dict:
-    """employment_status -> flag:
-        "unemployed"     -> ["no_employment_income"]
-        "self_employed"  -> ["self_employed_needs_review"]
-        anything else    -> []
-    Return {"risk_flags": [...]}."""
+    """Flag unemployed and self-employed applicants."""
     employment_status = state["application"].get("employment_status")
     risk_flags = []
     if employment_status == "unemployed":
@@ -70,13 +57,7 @@ def check_employment(state: ScreeningState) -> dict:
 
 
 def combine(state: ScreeningState) -> dict:
-    """Runs once, AFTER all three checks. Return:
-        "decision_hint": "refer" if there are any risk_flags, else "clear"
-        "messages": [AIMessage(...)]  - ONE new message whose text contains the
-                    decision_hint and the flag names (sorted), e.g.
-                    "Screening: refer. Flags: self_employed_needs_review, under_18"
-                    (use "none" when there are no flags)
-    Return only the NEW message. The reducer takes care of appending it."""
+    """Turn the flags into a decision hint and one summary message."""
     risk_flags = state["risk_flags"]
     decision_hint = "refer" if risk_flags else "clear"
 
@@ -93,8 +74,7 @@ def check_sanctions(state: ScreeningState) -> dict:
     return {"risk_flags": ["sanctions_match"] if is_sanctioned(applicant_name) else []}
 
 def build_graph():
-    """START fans out to all three checks; all three fan in to combine; combine -> END.
-    That's 3 edges out of START, 3 edges into combine, 1 edge to END. Compile it."""
+    """Standalone screening graph: every check in parallel, then combine."""
     builder = StateGraph(ScreeningState)
     builder.add_node(check_affordability)
     builder.add_node(check_age)

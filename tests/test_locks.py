@@ -1,16 +1,6 @@
-"""Lesson 12 stretch spec: one run per case at a time. Run: uv run pytest tests/test_lesson12b_case_lock.py -v
+"""One run per case at a time: in-process and Postgres locks, and 409s from the API.
 
-The double-click problem: two requests for the same case run at once, both start from the same
-saved state, and the one that finishes last silently overwrites the other (a lost update).
-The fix: before CHANGING a case, take that case's lock. If someone else holds it, don't wait:
-answer 409 "busy" (the "reject" strategy). Reads (GET) never need the lock.
-
-  locks.py   1. InProcessCaseLocks.hold   one process: a threading.Lock per case id
-             2. PostgresCaseLocks.hold    many replicas: a Postgres advisory lock (test needs LOANLENS_PG_URL)
-  api.py     3. the case_busy handler     CaseBusy -> 409 {"detail": BUSY}
-             4. send_message and decide:  wrap the work in `with locks.hold(case_id):`
-                (in decide, the awaiting_underwriter CHECK goes inside the lock too:
-                 check-then-act outside a lock is itself a race)
+The Postgres test runs when LOANLENS_PG_URL is set.
 """
 
 import os

@@ -1,4 +1,4 @@
-"""Lesson 11: run the LoanLens eval suite against your REAL model and print a scorecard.
+"""Run the LoanLens eval suite against your REAL model and print a scorecard.
 
     uv run python scripts/run_evals.py              # every case × 2 repeats
     uv run python scripts/run_evals.py 3            # every case × 3 repeats

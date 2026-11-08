@@ -1,8 +1,7 @@
-"""Lesson 12: cases survive a restart. Run: uv run pytest tests/test_lesson12_checkpointing.py -v
+"""Cases survive a restart: SQLite always, Postgres when LOANLENS_PG_URL is set, e.g.
 
-The Postgres test runs only when LOANLENS_PG_URL is set, e.g. against a local Postgres in Docker:
-  docker run -d --name loanlens-pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:16
-  LOANLENS_PG_URL=postgresql://postgres:dev@localhost:5432/postgres uv run pytest tests/test_lesson12_checkpointing.py -v
+    docker run -d -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:16
+    LOANLENS_PG_URL=postgresql://postgres:dev@localhost:5432/postgres uv run pytest tests/test_checkpointing.py
 """
 
 import os

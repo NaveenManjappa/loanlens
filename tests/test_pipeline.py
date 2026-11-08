@@ -1,7 +1,4 @@
-"""Lesson 4 spec. Run: uv run pytest tests/test_lesson04_pipeline.py -v
-
-All graph tests use the fake model from conftest.py, so they're free and offline.
-"""
+"""The pipeline's routing and outcomes, with a fake extraction model."""
 
 from langchain_core.messages import HumanMessage
 
@@ -25,7 +22,7 @@ MSG = [HumanMessage("(applicant's message; the fake model ignores it)")]
 
 def message_for(details):
     """A realistic applicant message that says what the fake extractor 'finds'.
-    (Since Lesson 11's age guard, an age the applicant never typed is thrown away.)"""
+    (The age guard discards an age the applicant never typed.)"""
     age = f", {details.age}" if details.age is not None else ""
     return [HumanMessage(f"I'm {details.applicant_name}{age}, {details.employment_status}, "
                          f"£{details.annual_income:,.0f} a year, want £{details.loan_amount:,.0f}")]

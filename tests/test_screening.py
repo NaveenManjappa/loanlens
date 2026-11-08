@@ -1,4 +1,4 @@
-"""Lesson 2 spec. Run: uv run pytest tests/test_lesson02_screening.py -v"""
+"""Screening checks, the risk_flags reducer and the parallel screening graph."""
 
 from typing import get_type_hints
 

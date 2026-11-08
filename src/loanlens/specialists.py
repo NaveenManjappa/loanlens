@@ -1,27 +1,19 @@
-"""Lesson 10: specialist agents as nodes in the pipeline (multi-agent, "custom workflow" pattern).
+"""Specialist agents as nodes in the pipeline.
 
-    ... refer_to_underwriter ─┬─> risk_specialist ───────┬─> underwriter_review (⏸)
-                              └─> compliance_specialist ─┘
-                                  (in parallel)
+    refer_to_underwriter -> risk_specialist + compliance_specialist (in parallel) -> underwriter_review
 
-Each specialist is a whole create_agent graph (Lessons 6/10) called INSIDE a node function:
-  - it gets its OWN private conversation (one request built from the application),
-    so its tool calls and results never touch the applicant's `messages`
-  - it returns ONE thing to the pipeline: a short report under specialist_reports[name]
-
-YOUR JOB:  uv run pytest tests/test_lesson10_multi_agent.py -v  -> green
-  1. merge_reports (a custom reducer)   2. make_specialist_node   3. default_specialists
-  + pipeline.py and underwriting.py changes listed at the top of the test file
+Each specialist is a whole create_agent graph, called inside a node with a private conversation built
+from the redacted application, so its tool calls never touch the applicant's messages. It returns one
+short report under specialist_reports[name], and merge_reports combines the parallel writes.
 """
 
-from langchain_core.messages import ToolMessage  # noqa: F401
+from langchain_core.messages import ToolMessage
 
-from loanlens.investigator_v2 import apply_policy, make_request  # noqa: F401
+from loanlens.investigator_v2 import apply_policy, make_request
 
 
 def merge_reports(left: dict | None, right: dict | None) -> dict:
-    """Reducer for specialist_reports. Two specialists write in the SAME super-step (Lesson 2),
-    each returning {"<its name>": report}. Merge them: {**left, **right}. Treat None as {}."""
+    """Reducer for specialist_reports: merge the reports written in the same super-step."""
     return {**(left or {}), **(right or {})}
 
 
@@ -32,15 +24,7 @@ def first_line(messages) -> str:
 
 
 def make_specialist_node(name: str, agent, verdict=first_line):
-    """Return a node function that:
-      1. builds a PRIVATE input: {"messages": [make_request(state["application"])]}
-      2. runs the agent:  result = agent.invoke(private_input, {"recursion_limit": 100})
-      3. returns ONLY  {"specialist_reports": {name: {
-             "verdict":    verdict(result["messages"]),
-             "memo":       the final message's content,
-             "tools_used": the names of every ToolMessage in result["messages"], in order,
-         }}}
-    Never return "messages": the applicant's conversation must not see the agent's working."""
+    """Build a node that runs the agent privately and returns only its report (verdict, memo, tools used)."""
 
     def node(state):
         private_input = {"messages": [make_request(state["application"])]}
@@ -65,10 +49,7 @@ def make_specialist_node(name: str, agent, verdict=first_line):
 
 
 def default_specialists(model=None) -> dict:
-    """The real specialists, built from the real model:
-        {"risk": (build_agent(model), apply_policy),          # Lesson 6 investigator + policy in code
-         "compliance": (build_compliance_agent(model), first_line)}
-    Import build_agent / build_compliance_agent inside the function."""
+    """The real specialists: the risk investigator (with policy in code) and the compliance agent."""
     from loanlens.investigator_v2 import build_agent  # avoid circular import
     from loanlens.compliance import (
         build_compliance_agent,
