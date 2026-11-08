@@ -99,7 +99,10 @@ def create_app(graph=None, lifespan=None, locks=None) -> FastAPI:
         """Lesson 12 stretch: 409 with {"detail": BUSY}.
         Then, in send_message and decide: add `locks=Depends(get_locks)` and do the work
         inside `with locks.hold(case_id):` (see tests/test_lesson12b_case_lock.py)."""
-        raise NotImplementedError
+        return JSONResponse(
+            status_code=409,
+            content={"detail": BUSY},
+        )
 
     @app.exception_handler(openai.APIError)
     def model_unavailable(request: Request, exc: openai.APIError):
@@ -117,10 +120,11 @@ def create_app(graph=None, lifespan=None, locks=None) -> FastAPI:
         return {"status": "ok"}
 
     @app.post("/cases/{case_id}/messages", response_model=CaseView)
-    def send_message(body: MessageIn, case_id: str = CaseId, graph=Depends(get_graph)):
+    def send_message(body: MessageIn, case_id: str = CaseId, graph=Depends(get_graph),locks=Depends(get_locks)):
         """continue_application(...), then return case_view(...)."""
-        continue_application(graph, case_id, body.text)
-        return case_view(graph, case_id)
+        with locks.hold(case_id):
+            continue_application(graph, case_id, body.text)
+            return case_view(graph, case_id)
 
     @app.get("/cases/{case_id}", response_model=CaseView)
     def get_case(case_id: str = CaseId, graph=Depends(get_graph)):
@@ -131,20 +135,22 @@ def create_app(graph=None, lifespan=None, locks=None) -> FastAPI:
         return view
 
     @app.get("/cases/{case_id}/review")
-    def get_review(case_id: str = CaseId, graph=Depends(get_graph)) -> dict:
+    def get_review(case_id: str = CaseId, graph=Depends(get_graph),locks=Depends(get_locks)) -> dict:
         """The payload from awaiting_underwriter, or 404 if no review is pending."""
-        review = awaiting_underwriter(graph, case_id)
+        with locks.hold(case_id):
+            review = awaiting_underwriter(graph, case_id)
         if review is None:
             raise HTTPException(status_code=404, detail="No review pending")
         return review
 
     @app.post("/cases/{case_id}/decision", response_model=CaseView)
-    def decide(body: DecisionIn, case_id: str = CaseId, graph=Depends(get_graph)):
+    def decide(body: DecisionIn, case_id: str = CaseId, graph=Depends(get_graph),locks=Depends(get_locks)):
         """409 if no review is pending. Otherwise submit_decision(graph, case_id, body.model_dump())
         and return case_view."""
-        if awaiting_underwriter(graph, case_id) is None:
-            raise HTTPException(status_code=409, detail="No review pending")
-        submit_decision(graph, case_id, body.model_dump())
+        with locks.hold(case_id):
+            if awaiting_underwriter(graph, case_id) is None:
+                raise HTTPException(status_code=409, detail="No review pending")
+            submit_decision(graph, case_id, body.model_dump())
         return case_view(graph, case_id)
 
     return app

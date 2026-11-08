@@ -34,8 +34,16 @@ class InProcessCaseLocks:
               Taken -> raise CaseBusy(case_id).
            3. yield (the caller's `with` block runs here), and release the lock in a
               try/finally, so it's freed even if the graph crashes."""
-        raise NotImplementedError
-        yield  # noqa (makes this a generator)
+        with self._guard:
+            lock = self._locks.setdefault(case_id, threading.Lock())
+
+        if not lock.acquire(blocking=False):
+            raise CaseBusy(case_id)
+
+        try:
+            yield
+        finally:
+            lock.release()
 
 
 class PostgresCaseLocks:
@@ -57,5 +65,12 @@ class PostgresCaseLocks:
         3.     row["got"] is False -> raise CaseBusy(case_id). Otherwise yield,
                INSIDE the with-block, so the transaction (and the lock) lasts while the caller works.
         Always pass case_id as a parameter (%s), never paste it into the SQL string."""
-        raise NotImplementedError
-        yield  # noqa (makes this a generator)
+        with self.pool.connection() as conn:
+            with conn.transaction():
+                row = conn.execute(
+                    "SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0)) AS got",
+                    (case_id,),
+                ).fetchone()
+                if row is None or not row["got"]:
+                    raise CaseBusy(case_id)
+                yield
