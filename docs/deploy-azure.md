@@ -33,10 +33,10 @@ az provider register --namespace Microsoft.OperationalInsights
 1. Sign up at [neon.com](https://neon.com) and create a project. Choose the region
    **AWS Europe (London)**, `aws-eu-west-2`, so case data stays in the UK and close to `uksouth`.
 2. Copy the **direct** connection string (not the "pooled" one). It looks like
-   `postgresql://user:password@ep-xxxx.eu-west-2.aws.neon.tech/neondb?sslmode=require`.
+   `postgresql://user:password@ep-xxxx.eu-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require`.
 3. Optional check from your Mac. A case should survive a "restart":
    ```bash
-   LOANLENS_PG_URL="<the connection string>" uv run pytest tests/test_lesson12_checkpointing.py -v
+   LOANLENS_PG_URL='<the connection string>' uv run pytest tests/test_lesson12_checkpointing.py -v
    ```
 
 The free plan suspends the database after 5 minutes without traffic. The next query wakes it in
@@ -77,7 +77,7 @@ LOC=uksouth
 APP=loanlens-api
 ENV_NAME=loanlens-env
 IMAGE=ghcr.io/naveenmanjappa/loanlens
-DATABASE_URL="<the Neon connection string>"
+DATABASE_URL='<the Neon connection string>'   # single quotes, no spaces around =
 ```
 
 ## 4. Create the app (about 5 minutes)
@@ -180,7 +180,7 @@ want to.
 | `az containerapp create` can't pull the image | The package is private, or the workflow for that commit hasn't finished (step 2). |
 | `/health` never answers | The app crashes at startup. Run `az containerapp logs show -n $APP -g $RG --type system`, and the console logs without `--type`. `KeyError: 'AZURE_OPENAI_…'` means a setting is missing. |
 | 503 "temporarily unavailable" on messages | The model call failed: check the endpoint, deployment name and key settings. |
-| Errors connecting to the database | Use the *direct* Neon string (no `-pooler`), ending in `?sslmode=require`. |
+| Errors connecting to the database | Use the *direct* Neon string (no `-pooler`), including `sslmode=require`, in single quotes. |
 
 ## Cost
 
@@ -196,7 +196,9 @@ want to.
 
 - **No authentication.** Applicants need sessions, and the underwriter endpoints need Microsoft
   Entra ID, for example Container Apps' built-in authentication.
-- **No protection against concurrent messages on the same case.** Two requests at once can race.
+- **Concurrent requests are rejected, not deduplicated.** A per-case lock (a Postgres advisory lock) stops two
+  requests changing one case at once: the second gets 409. An idempotency key would let a retry get the
+  first answer instead.
 - **The model key is stored as a secret.** In production, use a managed identity to reach Azure
   OpenAI with no key at all.
 - **The case data sits with a second provider** (Neon). It's in London, but production would need a

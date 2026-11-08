@@ -1,22 +1,33 @@
-"""Lesson 12: where the cases live. Done for you.
+"""Lesson 12: where the cases live, and who may change one right now. Done for you.
 
 Local development (no DATABASE_URL): a SQLite file, so cases survive restarts on your machine.
 Deployed (DATABASE_URL set):          Postgres, so cases survive restarts, redeploys and
                                       several replicas serving the same case.
 The graph doesn't care which: both are checkpointers (Lesson 8).
+
+open_backend() also returns the matching CASE LOCKS (Lesson 12 stretch): in-process locks for
+one local process, Postgres advisory locks when several replicas share one database.
 """
 
 from contextlib import contextmanager
+from typing import Any, NamedTuple
+
+
+class Backend(NamedTuple):
+    checkpointer: Any
+    locks: Any
 
 
 @contextmanager
-def open_checkpointer(database_url: str | None = None, sqlite_path: str = "loanlens_cases.db"):
-    """Yield a ready checkpointer for the app's lifetime and close it afterwards."""
+def open_backend(database_url: str | None = None, sqlite_path: str = "loanlens_cases.db"):
+    """Yield Backend(checkpointer, locks) for the app's lifetime and close everything afterwards."""
+    from loanlens.locks import InProcessCaseLocks, PostgresCaseLocks
+
     if not database_url:
         from langgraph.checkpoint.sqlite import SqliteSaver
 
         with SqliteSaver.from_conn_string(sqlite_path) as saver:
-            yield saver
+            yield Backend(saver, InProcessCaseLocks())
         return
 
     from langgraph.checkpoint.postgres import PostgresSaver
@@ -32,4 +43,11 @@ def open_checkpointer(database_url: str | None = None, sqlite_path: str = "loanl
     ) as pool:
         saver = PostgresSaver(pool)
         saver.setup()  # creates the checkpoint tables on first run; safe to repeat
-        yield saver
+        yield Backend(saver, PostgresCaseLocks(pool))
+
+
+@contextmanager
+def open_checkpointer(database_url: str | None = None, sqlite_path: str = "loanlens_cases.db"):
+    """Just the checkpointer (kept for the Lesson 12 tests and scripts)."""
+    with open_backend(database_url, sqlite_path) as backend:
+        yield backend.checkpointer

@@ -26,12 +26,14 @@ from langchain_core.messages import AIMessage  # noqa: F401
 from pydantic import BaseModel, Field
 
 from loanlens.cases import continue_application, thread_config  # noqa: F401
+from loanlens.locks import CaseBusy, InProcessCaseLocks  # noqa: F401
 from loanlens.underwriting import awaiting_underwriter, submit_decision  # noqa: F401
 
 # case ids become LangGraph thread ids: allow only safe characters, and never use PII
 # (an email or NI number) as a case id: ids appear in URLs and access logs.
 CaseId = Path(pattern=r"^[A-Za-z0-9_-]{1,64}$")
 UNAVAILABLE = "LoanLens is temporarily unavailable. Please try again shortly."
+BUSY = "This case is already being processed. Please wait a moment and try again."
 
 
 class MessageIn(BaseModel):
@@ -55,6 +57,10 @@ class CaseView(BaseModel):
 
 def get_graph(request: Request):
     return request.app.state.graph
+
+
+def get_locks(request: Request):
+    return request.app.state.locks
 
 
 def case_view(graph, case_id: str) -> dict | None:
@@ -82,10 +88,18 @@ def case_view(graph, case_id: str) -> dict | None:
     }
 
 
-def create_app(graph=None, lifespan=None) -> FastAPI:
+def create_app(graph=None, lifespan=None, locks=None) -> FastAPI:
     app = FastAPI(title="LoanLens", lifespan=lifespan)
+    app.state.locks = locks or InProcessCaseLocks()  # main.py swaps in Postgres locks at startup
     if graph is not None:
         app.state.graph = graph
+
+    @app.exception_handler(CaseBusy)
+    def case_busy(request: Request, exc: CaseBusy):
+        """Lesson 12 stretch: 409 with {"detail": BUSY}.
+        Then, in send_message and decide: add `locks=Depends(get_locks)` and do the work
+        inside `with locks.hold(case_id):` (see tests/test_lesson12b_case_lock.py)."""
+        raise NotImplementedError
 
     @app.exception_handler(openai.APIError)
     def model_unavailable(request: Request, exc: openai.APIError):
