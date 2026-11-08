@@ -174,8 +174,9 @@ docs/                ADRs and the Azure runbook
 
 This is a portfolio system, not a production lender. What's deliberately not done yet:
 
-- **Authentication:** anyone with the URL can act as an underwriter. Next: Microsoft Entra ID for underwriters, sessions for applicants.
-- **Idempotency keys:** a concurrent request is rejected (`409`), but a retried request should get the first answer back.
+- **Authentication:** anyone with the URL can act as an underwriter. Planned: Microsoft Entra ID, with the underwriter's identity taken from the login ([ADR 0004](docs/decisions/0004-authentication-entra-id.md)).
+- **Idempotency keys:** a concurrent request is rejected (`409`), but a retried request should get the first answer back. Planned: an `Idempotency-Key` header ([ADR 0003](docs/decisions/0003-idempotency-keys.md)).
+- **No UI:** the API is the only interface. Planned: an applicant chat and an underwriter review queue ([ADR 0005](docs/decisions/0005-ui-and-review-queue.md)).
 - **Vulnerable customers (Consumer Duty):** vulnerability markers are only checked on referred cases; the content filter is not a vulnerability detector.
 - **Automated declines:** under-18 applications are declined without a human. That's a legal-capacity rule, but production would still need Article 22 safeguards: telling the applicant, and offering human review on request.
 - **Employment status from a job title:** the policy above is a prompt rule, and a stricter live test
