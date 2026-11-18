@@ -150,6 +150,8 @@ Open `http://127.0.0.1:8000/docs` for the interactive API. Locally, cases are ke
 Real-model evals: `uv run python scripts/run_evals.py` (add `LANGSMITH_*` settings to `.env` for traces).
 Deployment: [docs/deploy-azure.md](docs/deploy-azure.md).
 
+Full developer guide: [docs/guide/](docs/guide/README.md).
+
 ## Project structure
 
 The code is split into layers, and dependencies point inward: `api` → `graph` → `agents` → `tools`
