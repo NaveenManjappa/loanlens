@@ -59,7 +59,7 @@ LangGraph's storage format.
 
 - The underwriter workflow becomes demonstrable end to end, and the demo video becomes possible.
 - The `cases` table is a second source of truth beside the checkpoints. It must be updated in the same
-  place as every outcome change (in `cases.py` and the decision route), or the two will drift apart.
+  place as every outcome change (in `graph/cases.py` and the decision route), or the two will drift apart.
   The checkpoint stays the authority; the table is an index.
 - Depends on ADR 0003 (keys) and ADR 0004 (sign-in): build those first.
 - One more component to deploy: a second container app, or static hosting for an Angular build.

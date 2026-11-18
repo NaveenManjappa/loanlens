@@ -9,7 +9,7 @@ Two endpoints change a case: `POST /cases/{case_id}/messages` (an applicant mess
 `POST /cases/{case_id}/decision` (an underwriter decision). Each one runs the graph, calls the model
 (1 to 6 calls), and writes checkpoints.
 
-The per-case lock (`locks.py`) stops two requests changing the same case **at the same time**: the
+The per-case lock (`integrations/locks.py`) stops two requests changing the same case **at the same time**: the
 second gets `409`. It does nothing for the same request arriving **again after the first finished**.
 That happens whenever a client retries:
 
@@ -41,7 +41,7 @@ happen twice too.
 - A key is scoped to its case and endpoint: the same key on another case is a different key.
 - A table `idempotency_keys`: `case_id`, `endpoint`, `key`, `request_hash` (a hash of the body),
   `status_code`, `response_body`, `created_at`, with primary key (`case_id`, `endpoint`, `key`).
-  SQLite locally and Postgres when deployed, the same choice `checkpointing.py` already makes.
+  SQLite locally and Postgres when deployed, the same choice `integrations/storage.py` already makes.
 - Behaviour, all inside the existing per-case lock:
 
   | Situation | Response |

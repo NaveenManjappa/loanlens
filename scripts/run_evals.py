@@ -18,7 +18,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(ROOT / ".env")
 from loanlens.evals import EVALUATORS, load_dataset, run_case, summarise  # noqa: E402
-from loanlens.llm import get_model  # noqa: E402
+from loanlens.integrations.llm import get_model  # noqa: E402
 
 repeats = int(sys.argv[1]) if len(sys.argv) > 1 else 2
 only = sys.argv[2] if len(sys.argv) > 2 else None

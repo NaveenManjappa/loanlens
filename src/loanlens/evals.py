@@ -15,10 +15,10 @@ from langchain_core.callbacks import BaseCallbackHandler, UsageMetadataCallbackH
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.memory import InMemorySaver
 
-from loanlens.grounding import age_in_text
-from loanlens.pii import redact_at_boundary
-from loanlens.pipeline import build_graph
-from loanlens.specialists import default_specialists
+from loanlens.graph.intake import redact_at_boundary
+from loanlens.graph.pipeline import build_graph
+from loanlens.graph.specialists import default_specialists
+from loanlens.services.grounding import age_in_text
 
 DATASET = Path(__file__).resolve().parents[2] / "evals" / "dataset.json"
 
@@ -60,7 +60,6 @@ def run_case(case: dict, model: BaseChatModel) -> dict[str, Any]:
     )
     total_tokens = sum(u.get("total_tokens", 0) for u in usage.usage_metadata.values())
     return {
-        "final": final,
         "outcome": final.get("outcome"),
         "application": final.get("application") or {},
         "prompts": prompts.prompts,

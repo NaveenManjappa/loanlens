@@ -1,6 +1,6 @@
 """Read-only helpers the tests use to inspect a case."""
 
-from loanlens.cases import thread_config
+from loanlens.graph.cases import thread_config
 
 
 def current_outcome(graph, case_id: str) -> str | None:

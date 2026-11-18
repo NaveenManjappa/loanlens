@@ -2,7 +2,7 @@
 
 from langgraph.checkpoint.memory import InMemorySaver
 
-from loanlens.cases import continue_application
+from loanlens.domain.application import ApplicationDetails
 from loanlens.evals import (
     age_not_invented,
     extraction_correct,
@@ -11,8 +11,8 @@ from loanlens.evals import (
     outcome_matches,
     summarise,
 )
-from loanlens.extraction import ApplicationDetails
-from loanlens.pipeline import build_graph
+from loanlens.graph.cases import continue_application
+from loanlens.graph.pipeline import build_graph
 
 
 def run(outcome=None, application=None, prompts=()):

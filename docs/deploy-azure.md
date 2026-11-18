@@ -36,7 +36,7 @@ az provider register --namespace Microsoft.OperationalInsights
    `postgresql://user:password@ep-xxxx.eu-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require`.
 3. Optional check from your Mac. A case should survive a "restart":
    ```bash
-   LOANLENS_PG_URL='<the connection string>' uv run pytest tests/test_checkpointing.py -v
+   LOANLENS_PG_URL='<the connection string>' uv run pytest tests/integrations/test_storage.py -v
    ```
 
 The free plan suspends the database after 5 minutes without traffic. The next query wakes it in

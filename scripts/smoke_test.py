@@ -10,7 +10,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from loanlens.llm import REQUIRED_ENV, get_model, v1_base_url  # noqa: E402
+from loanlens.integrations.llm import REQUIRED_ENV, get_model, v1_base_url  # noqa: E402
 
 HINTS = {
     "401": "Key rejected. In Foundry, re-copy the API key into AZURE_OPENAI_API_KEY.",

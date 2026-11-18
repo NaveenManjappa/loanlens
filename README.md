@@ -132,8 +132,7 @@ Requires [uv](https://docs.astral.sh/uv/) and an Azure OpenAI deployment.
 ```bash
 uv sync
 cp .env.example .env                 # add your Azure OpenAI endpoint, key and deployment name
-uv run pytest                        # the full suite, with fake models (no API calls)
-uv run ruff check . && uv run ruff format --check .   # lint + formatting
+make check                           # format, lint and the full suite, with fake models (no API calls)
 uv run uvicorn loanlens.main:app --reload
 ```
 
@@ -153,24 +152,41 @@ Deployment: [docs/deploy-azure.md](docs/deploy-azure.md).
 
 ## Project structure
 
+The code is split into layers, and dependencies point inward: `api` → `graph` → `agents` → `tools`
+→ `services` / `integrations` → `domain`. `tests/` mirrors `src/loanlens/`, and
+`tests/test_architecture.py` fails the build if `services/` or `domain/` import a framework.
+
 ```
 src/loanlens/
-  pipeline.py        the graph: nodes, routing, build_graph()
-  state.py           PipelineState, the one state schema (and its reducers)
-  pii.py             boundary redaction + PIIMiddleware for agents
-  extraction.py      LLM extraction into a typed Pydantic schema
-  grounding.py       the age guard (shared with the evaluator)
-  screening.py       validation + parallel policy checks, including sanctions
-  specialists.py     specialist agents as nodes
-  risk.py            risk agent + its tools    compliance.py   compliance agent + its tools
-  underwriting.py    human-review nodes (interrupt, validation, routing)
-  cases.py           operations on a case: continue, hold, resume, content-filter recovery
-  evals.py           eval runner and evaluators
-  api.py · main.py   FastAPI app       checkpointing.py · locks.py   Postgres/SQLite + case locks
-tests/               one spec file per feature, fake models only
-evals/dataset.json   labelled eval cases
-docs/                ADRs and the Azure runbook
+  main.py                 the app uvicorn runs: settings, logging, startup
+  api/                    app.py (routes, error handling) · schemas.py (request/response models)
+  config/                 settings.py: every environment variable, read once
+  domain/                 application.py: ApplicationDetails, the extracted application
+  graph/                  pipeline.py (build_graph, routing) · state.py · intake.py · screening.py
+                          specialists.py · underwriting.py · cases.py (continue, hold, resume)
+  agents/                 risk_agent.py · compliance_agent.py · middleware.py (PII) · prompts.py
+  tools/                  risk_tools.py · compliance_tools.py: thin @tool wrappers
+  services/               policy.py · pii.py · grounding.py · decisions.py: plain Python rules
+  integrations/           llm.py (Azure OpenAI) · storage.py · locks.py
+                          credit_bureau.py · compliance_registry.py (fake external systems)
+  prompts/                extraction.md · risk_agent.md · compliance_agent.md
+  evals.py                eval runner and evaluators
+tests/                    mirrors src/loanlens/, fake models only
+evals/dataset.json        labelled eval cases
+docs/                     ADRs and the Azure runbook
 ```
+
+| Folder | Holds | Must not hold |
+|---|---|---|
+| `api/` | Routes, request and response models | Business logic |
+| `graph/` | State, nodes, routing, operations on a case | SQL, HTTP clients, policy thresholds |
+| `agents/` | One module per agent: prompt, tools, middleware, how its answer is read | Shared business logic |
+| `tools/` | Thin tool wrappers the model can call | Real logic: that lives in `services/` and `integrations/` |
+| `services/` | Policy rules and calculations | LangChain, LangGraph, FastAPI or OpenAI imports |
+| `integrations/` | Clients for outside systems: model provider, database, bureau, registries | Business rules |
+| `domain/` | Pydantic models shared across the app | Framework imports |
+| `config/` | Settings | Secrets in code |
+| `prompts/` | Prompt text | Code |
 
 ## Known gaps
 
@@ -182,7 +198,7 @@ This is a portfolio system, not a production lender. What's deliberately not don
 - **Vulnerable customers (Consumer Duty):** vulnerability markers are only checked on referred cases; the content filter is not a vulnerability detector.
 - **Automated declines:** under-18 applications are declined without a human. That's a legal-capacity rule, but production would still need Article 22 safeguards: telling the applicant, and offering human review on request.
 - **Employment status from a job title:** the policy above is a prompt rule, and a stricter live test
-  (`tests/test_extraction.py`) shows the model still occasionally infers "employed" from "teacher". A code
+  (`tests/graph/test_intake.py`) shows the model still occasionally infers "employed" from "teacher". A code
   guard, like the one for invented ages, would make it watertight.
 - **Audit log:** decisions live in checkpoints; production needs an append-only, access-controlled audit store.
 - **Keyless model access** (managed identity), private networking, a data-processing agreement for the database provider, and alerts on error rates and eval scores.

@@ -12,6 +12,7 @@ dependencies = [
     "uvicorn[standard]>=0.54.0",
     "langgraph-checkpoint-postgres>=3.2.0",
     "psycopg[binary,pool]>=3.3.8",
+    "pydantic-settings>=2.10",
 ]
 
 [dependency-groups]
@@ -23,6 +24,10 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests/ mirrors src/loanlens/. importlib mode lets test files in different folders share a
+# name without __init__.py files; pythonpath lets any test import tests/helpers.py.
+addopts = "--import-mode=importlib"
+pythonpath = ["tests"]
 markers = ["live: calls the real LLM (run with LOANLENS_LIVE=1)"]
 
 [build-system]
