@@ -19,6 +19,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Install dependencies (exactly as locked)
         run: uv sync --frozen
+      - name: Lint and check formatting
+        run: uv run ruff check . && uv run ruff format --check .
       - name: Run the test suite (fake models only, so no secrets are needed)
         run: uv run pytest -q
 

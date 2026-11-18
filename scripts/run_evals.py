@@ -18,22 +18,35 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(ROOT / ".env")
 from loanlens.evals import EVALUATORS, load_dataset, run_case, summarise  # noqa: E402
-from loanlens.pipeline import build_graph  # noqa: E402
+from loanlens.integrations.llm import get_model  # noqa: E402
 
 repeats = int(sys.argv[1]) if len(sys.argv) > 1 else 2
 only = sys.argv[2] if len(sys.argv) > 2 else None
 cases = [c for c in load_dataset() if only in (None, c["id"])]
 
+model = get_model()
 results = []
-print(f"{'case':<20} {'run':>3}  {'outcome':<22} " + " ".join(f"{e.__name__[:12]:>12}" for e in EVALUATORS) + "   tokens  calls")
+print(
+    f"{'case':<20} {'run':>3}  {'outcome':<22} "
+    + " ".join(f"{e.__name__[:12]:>12}" for e in EVALUATORS)
+    + "   tokens  calls"
+)
 for case in cases:
     for i in range(repeats):
-        r = run_case(case, build_graph)
+        r = run_case(case, model)
         scores = {e.__name__: e(case, r) for e in EVALUATORS}
-        results.append({"case_id": case["id"], "scores": scores, "total_tokens": r["total_tokens"],
-                        "model_calls": r["model_calls"]})
+        results.append(
+            {
+                "case_id": case["id"],
+                "scores": scores,
+                "total_tokens": r["total_tokens"],
+                "model_calls": r["model_calls"],
+            }
+        )
         cells = " ".join(f"{ {True: '✓', False: '✗', None: '·'}[v]:>12}" for v in scores.values())
-        print(f"{case['id']:<20} {i + 1:>3}  {str(r['outcome']):<22} {cells}   {r['total_tokens']:>6}  {r['model_calls']:>5}")
+        print(
+            f"{case['id']:<20} {i + 1:>3}  {str(r['outcome']):<22} {cells}   {r['total_tokens']:>6}  {r['model_calls']:>5}"
+        )
 
 print("\n── pass rates (✓ / (✓+✗), '·' = not applicable) ──")
 for name, rate in summarise(results).items():

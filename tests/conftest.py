@@ -44,33 +44,6 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
-class FakeToolModel:
-    """Stands in for a tool-calling chat model. Replays a SCRIPT of AIMessages:
-    each invoke() returns the next one (the last one repeats forever).
-    Records the tools it was bound with and every message list it was sent."""
-
-    def __init__(self, script):
-        self.script = list(script)
-        self.tools = None
-        self.calls = []
-
-    def bind_tools(self, tools, **kwargs):
-        self.tools = list(tools)
-        return self
-
-    def invoke(self, messages, *args, **kwargs):
-        self.calls.append(list(messages))
-        i = min(len(self.calls) - 1, len(self.script) - 1)
-        # Fresh copy with a new id each time: add_messages REPLACES messages that share
-        # an id, so replaying the same object would overwrite, not append.
-        return self.script[i].model_copy(update={"id": str(uuid.uuid4())})
-
-
-@pytest.fixture
-def fake_tool_model():
-    return FakeToolModel
-
-
 # ── create_agent needs a REAL chat-model class, so this fake subclasses BaseChatModel ──
 
 from langchain_core.language_models.chat_models import BaseChatModel  # noqa: E402

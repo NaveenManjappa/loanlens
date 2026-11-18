@@ -1,6 +1,6 @@
 # ADR 0002: Harmful and off-topic input: rely on the provider's content filter
 
-**Status:** Accepted. The required error handling (below) is implemented in `cases.py`. The audit log is deferred.
+**Status:** Accepted. The required error handling (below) is implemented in `graph/cases.py`. The audit log is deferred.
 **Date:** November 2026
 
 ## Context

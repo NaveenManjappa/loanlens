@@ -12,19 +12,38 @@ dependencies = [
     "uvicorn[standard]>=0.54.0",
     "langgraph-checkpoint-postgres>=3.2.0",
     "psycopg[binary,pool]>=3.3.8",
+    "pydantic-settings>=2.10",
 ]
 
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
     "pytest>=8",
+    "ruff>=0.17.4",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests/ mirrors src/loanlens/. importlib mode lets test files in different folders share a
+# name without __init__.py files; pythonpath lets any test import tests/helpers.py.
+addopts = "--import-mode=importlib"
+pythonpath = ["tests"]
 markers = ["live: calls the real LLM (run with LOANLENS_LIVE=1)"]
 
 [build-system]
 requires = ["uv_build>=0.11,<0.12"]
 build-backend = "uv_build"
 
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+# pycodestyle errors, pyflakes, import sorting, bugbear, modern syntax
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]  # the formatter handles line length
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency markers are meant to be used as argument defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Path"]
